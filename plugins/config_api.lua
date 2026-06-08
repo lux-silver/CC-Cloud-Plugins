@@ -6,6 +6,7 @@ local plugin = {}
 plugin.name  = "config_api"
 plugin.label = "config_api"
 plugin.patch = true
+plugin.priority = 0
 
 function plugin.run()
 

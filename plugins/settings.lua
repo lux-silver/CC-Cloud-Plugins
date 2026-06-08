@@ -7,6 +7,7 @@ local plugin  = {}
 plugin.name   = "settings"
 plugin.label  = "Settings"
 plugin.patch  = false  -- appears as menu entry
+plugin.priority = 1
 
 -- ── Built-in: theme color ─────────────────────────────────────────────────────
 -- Patches clickMenu to use the chosen header color
@@ -101,17 +102,11 @@ plugin.run = function()
         configAPI.register({
             plugin   = "Cloud Theme",
             key      = "theme.nickname",
-            label    = "Log Nickname",
+            label    = "Nickname",
             type     = "text",
             default  = "",
             onChange = function(v)
-                applyNickname(v)
-                -- patch username display if possible
-                if v and v ~= "" then
-                    _G.cloudDisplayName = v
-                else
-                    _G.cloudDisplayName = nil
-                end
+                _G.cloudDisplayName = (v and v ~= "") and v or nil
             end,
         })
     end

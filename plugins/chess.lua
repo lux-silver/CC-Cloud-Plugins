@@ -6,6 +6,7 @@
 local plugin = {}
 plugin.name  = "Chess"
 plugin.label = "Chess"
+plugin.priority = 10
 
 -- ── Constants ─────────────────────────────────────────────────────────────────
 local PROTOCOL = "chess_plugin"

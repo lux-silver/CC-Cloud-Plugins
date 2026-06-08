@@ -1,5 +1,26 @@
 -- CC-Cloud-Plugins Installer v2
 -- Usage: install  (first time or update)
+-- As a plugin (priority=0): auto-checks updates on boot, requests restart if needed
+-- plugin.priority = 0  → runs before instance (pre-boot)
+-- plugin.patch    = true
+
+local plugin   = {}
+plugin.name     = "installer"
+plugin.label    = "installer"
+plugin.patch    = true
+plugin.priority = 0
+
+-- ── Pre-boot: silent update check ────────────────────────────────────────────
+function plugin.preBoot(ctx)
+    -- silent check: compare timestamps, request restart if anything changed
+    local updated = silentCheck()  -- defined below
+    if updated > 0 then
+        ctx.requestRestart("Updates applied ("..updated.." file(s)). Restart to use new version.")
+    end
+end
+
+-- plugin.run is never called (priority 0 / patch)
+function plugin.run() end
 
 local REPO     = "lux-silver/CC-Cloud-Plugins"
 local BRANCH   = "main"
@@ -227,3 +248,28 @@ term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
 term.write(" Press any key to exit...")
 os.pullEvent("key")
 term.setBackgroundColor(colors.black) term.clear()
+
+-- ── Silent check (used by preBoot) ────────────────────────────────────────────
+-- Returns number of files updated, no UI
+function silentCheck()
+    local files = fetchTree()
+    if not files then return 0 end
+    local count = 0
+    for _, path in ipairs(files) do
+        local remote = download(path)
+        if remote then
+            local local_ = readFile(path)
+            local localClean  = stripTS(local_)
+            local remoteClean = stripTS(remote)
+            local same = localClean and localClean:gsub("%s+$","") == remoteClean:gsub("%s+$","")
+            if not same then
+                if local_ then backupFile(path) end
+                writeFile(path, injectTS(remoteClean, now()))
+                count = count + 1
+            end
+        end
+    end
+    return count
+end
+
+return plugin

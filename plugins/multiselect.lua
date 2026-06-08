@@ -9,6 +9,7 @@ local plugin  = {}
 plugin.name   = "multiselect"
 plugin.label  = "multiselect"
 plugin.patch  = true   -- patch plugin: runs at load time, no menu entry
+plugin.priority = 1
 
 function plugin.run()
     -- This plugin patches itemListUI directly in the shared scope
