@@ -1,12 +1,6 @@
--- Cloud Launcher v4 (CORRIGIDO: Sem tela duplicada no pre-boot)
+-- Cloud Launcher v4 (CORRIGIDO: Tela azul apenas quando há atualizações)
 -- Copies cloud_user.lua to a sandbox instance, injects plugins, runs it
 -- cloud_user.lua is NEVER modified
---
--- Plugin priority system:
---   plugin.priority = 0   → runs BEFORE instance is created (pre-boot)
---   plugin.priority = 1   → patch plugin (default for patch=true)
---   plugin.priority = 10  → menu plugin (default for patch=false)
---   lower number = runs first within each group
 
 local CLOUD_USER = "cloud_user.lua"
 local INSTANCE   = ".cloud_instance.lua"
@@ -17,23 +11,21 @@ if not fs.exists(CLOUD_USER) then
 end
 
 -- ── Load plugin metadata (without executing) ──────────────────────────────────
--- We read each plugin file, execute it to get the table, then sort by priority
-
 local function loadPluginMeta(path)
     local pf = fs.open(path, "r")
     local psrc = pf.readAll()
     pf.close()
     
-    -- CORREÇÃO: Ativa a trava global temporariamente antes de rodar o pcall
+    -- Força o instalador a ler apenas os metadados em silêncio absoluto aqui
     _G._cloudPluginLoad = true
     local ok, p = pcall(loadstring(psrc, "@"..path))
-    _G._cloudPluginLoad = nil -- Desativa logo em seguida
+    _G._cloudPluginLoad = nil
     
     if not ok or type(p) ~= "table" or not p.name then return nil, psrc end
     return p, psrc
 end
 
-local allPlugins = {}  -- {meta=table, src=string, path=string}
+local allPlugins = {}
 
 if fs.isDir(PLUGIN_DIR) then
     for _, file in ipairs(fs.list(PLUGIN_DIR)) do
@@ -64,19 +56,23 @@ local context = {
     end
 }
 
--- Execute priority 0 preBoot functions before stripping anything
+-- Executa os plugins de pre-boot
 for _, p in ipairs(allPlugins) do
     local prio = p.meta and p.meta.priority or (p.meta and p.meta.patch and 1 or 10)
     if prio == 0 and p.meta.preBoot then
-        -- Execute a função preBoot de verdade com a trava ligada para o ambiente
-        _G._cloudPluginLoad = true
+        
+        -- !!! TRUQUE MÁGICO !!!
+        -- Definimos como FALSE para que o install.lua saiba que PODE rodar e mostrar a tela.
+        -- Mas o install.lua original só vai abrir a interface gráfica se ele REALMENTE 
+        -- detetar um arquivo modificado na internet. Se estiver tudo igual, ele sai em silêncio.
+        _G._cloudPluginLoad = false 
+        
         pcall(p.meta.preBoot, context)
-        _G._cloudPluginLoad = nil
         
         if context.restartRequested then
             print(context.reason)
             os.sleep(1)
-            -- re-run launcher to apply changes
+            -- Re-executa o launcher para aplicar as mudanças (Segundo Boot)
             os.queueEvent("timer", 0)
             os.pullEvent("timer")
             return shell.run(shell.getRunningProgram())
@@ -95,7 +91,7 @@ for line in (src .. "\n"):gmatch("([^\n]*)\n") do
     table.insert(lines, line)
 end
 
--- Remove trailing blank lines and installer timestamps
+-- Remove linhas vazias e assinaturas do instalador no final
 while #lines > 0 do
     local lastLine = lines[#lines]:gsub("%s+$", "")
     if lastLine == "" or lastLine:match("%-%-%-? ?@installed:%d+") then
@@ -105,7 +101,7 @@ while #lines > 0 do
     end
 end
 
--- expect last 4 lines: "end", "    if isAdmin...", "    doLogin()", "while true do"
+-- Corta o loop final original de 4 linhas
 for _ = 1, 4 do 
     if #lines > 0 then table.remove(lines) end 
 end
@@ -114,12 +110,11 @@ local stripped = table.concat(lines, "\n")
 -- ── Build injected code ───────────────────────────────────────────────────────
 local inject = {}
 
--- load all plugin files inline so they share the same scope
 table.insert(inject, "\n-- === Cloud Launcher injection ===")
 table.insert(inject, "local _plugins = {}")
 for _, p in ipairs(allPlugins) do
     local prio = p.meta and p.meta.priority or (p.meta and p.meta.patch and 1 or 10)
-    if prio > 0 then -- skip pre-boot plugins from being registered in global menu
+    if prio > 0 then
         table.insert(inject, "do")
         table.insert(inject, "  local _p = (function()")
         table.insert(inject, p.src)
@@ -129,7 +124,7 @@ for _, p in ipairs(allPlugins) do
     end
 end
 
--- separate plugins: patch plugins (no menu entry) vs menu plugins
+-- Injeção do menu do utilizador e plugins patch
 table.insert(inject, [[
 local _menuPlugins  = {}
 local _patchPlugins = {}
@@ -141,7 +136,7 @@ for _, p in ipairs(_plugins) do
     end
 end
 
--- run patch plugins immediately (they modify globals like itemListUI)
+-- Executa os patches imediatamente
 for _, p in ipairs(_patchPlugins) do p.run() end
 
 local _origUserMenu = userMenu
@@ -183,7 +178,7 @@ userMenu = function()
 end
 ]])
 
--- restore main loop
+-- Restaura o loop principal
 table.insert(inject, "\nwhile true do")
 table.insert(inject, "    doLogin()")
 table.insert(inject, "    if isAdmin then adminMenu() else userMenu() end")
