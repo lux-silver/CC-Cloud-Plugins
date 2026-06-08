@@ -137,18 +137,45 @@ local function drawCheckbox(x, y, value, label)
     return {row=y, x1=x, x2=x+3}
 end
 
+
 local function drawTextbox(x, y, w, value, focused, label)
-    term.setCursorPos(x, y) term.setBackgroundColor(colors.black)
+    term.setCursorPos(x, y)
+    term.setBackgroundColor(colors.black)
+
     if label then
-        term.setTextColor(colors.white) term.write(label..": ")
-        x = x + #label + 2  w = w - #label - 2
+        term.setTextColor(colors.white)
+        term.write(label .. ": ")
+        x = x + #label + 2
+        w = w - #label - 2
     end
+
     term.setCursorPos(x, y)
     term.setBackgroundColor(focused and colors.gray or colors.black)
     term.setTextColor(colors.white)
-    local disp = tostring(value or ""):sub(-(w-3))
-    term.write("["..disp..(focused and "_" or " ")..string.rep(" ", math.max(0,w-#disp-3)).."]")
-    return {row=y, x1=x, x2=x+w-1}
+
+    -- Corrige erro quando value for número, boolean ou nil
+    local text = tostring(value or "")
+
+    local disp
+    if #text > (w - 3) then
+        disp = text:sub(-(w - 3))
+    else
+        disp = text
+    end
+
+    term.write(
+        "[" ..
+        disp ..
+        (focused and "_" or " ") ..
+        string.rep(" ", math.max(0, w - #disp - 3)) ..
+        "]"
+    )
+
+    return {
+        row = y,
+        x1 = x,
+        x2 = x + w - 1
+    }
 end
 
 local function drawColorPicker(x, y, cur)
