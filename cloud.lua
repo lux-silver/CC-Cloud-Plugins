@@ -41,7 +41,6 @@ while #lines > 0 do
     end
 end
 
--- Agora o corte das últimas 4 linhas funciona perfeitamente!
 -- expect last 4 lines: "end", "    if isAdmin...", "    doLogin()", "while true do"
 for _ = 1, 4 do 
     if #lines > 0 then table.remove(lines) end 
