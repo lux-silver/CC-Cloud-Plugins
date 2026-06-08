@@ -31,7 +31,7 @@ for line in (src .. "\n"):gmatch("([^\n]*)\n") do
     table.insert(lines, line)
 end
 
--- CORREÇÃO: Limpa linhas vazias e a assinatura do instalador antes do corte das 4 linhas
+-- CORRECTION: Clear empty lines and the installer's signature before cutting the 4 lines.
 while #lines > 0 do
     local lastLine = lines[#lines]:gsub("%s+$", "") -- remove espaços em branco
     if lastLine == "" or lastLine:match("%-%-%-? ?@installed:%d+") then
