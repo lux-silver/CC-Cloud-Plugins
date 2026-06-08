@@ -166,7 +166,28 @@ local function log(msg, fg)
     end
 end
 
--- ── Main ──────────────────────────────────────────────────────────────────────
+-- ── Mode detection ───────────────────────────────────────────────────────────
+-- When loaded as plugin by cloud.lua, _cloudPluginLoad is true.
+-- In that case skip the UI entirely and return plugin table immediately.
+-- silentCheck() is defined further down but assigned to plugin.preBoot via closure.
+
+local _isPlugin = _G._cloudPluginLoad == true
+
+-- forward-declare silentCheck so preBoot closure can call it
+local silentCheck
+
+function plugin.preBoot(ctx)
+    if silentCheck then
+        local updated = silentCheck()
+        if updated > 0 then
+            ctx.requestRestart("Updates applied ("..updated.." file(s)). Restart to apply.")
+        end
+    end
+end
+
+if _isPlugin then return plugin end
+
+-- ── Main (direct run only) ───────────────────────────────────────────────────
 initUI()
 drawBar(0, 1, "Fetching file list...")
 log("Connecting to GitHub...", colors.gray)
@@ -251,7 +272,8 @@ term.setBackgroundColor(colors.black) term.clear()
 
 -- ── Silent check (used by preBoot) ────────────────────────────────────────────
 -- Returns number of files updated, no UI
-function silentCheck()
+-- ── Silent check (assigned to forward-declared local for preBoot) ────────────
+silentCheck = function()
     local files = fetchTree()
     if not files then return 0 end
     local count = 0
