@@ -1,4 +1,4 @@
--- Cloud Launcher v4
+-- Cloud Launcher v4 (CORRIGIDO: Sem tela duplicada no pre-boot)
 -- Copies cloud_user.lua to a sandbox instance, injects plugins, runs it
 -- cloud_user.lua is NEVER modified
 --
@@ -23,7 +23,12 @@ local function loadPluginMeta(path)
     local pf = fs.open(path, "r")
     local psrc = pf.readAll()
     pf.close()
+    
+    -- CORREÇÃO: Ativa a trava global temporariamente antes de rodar o pcall
+    _G._cloudPluginLoad = true
     local ok, p = pcall(loadstring(psrc, "@"..path))
+    _G._cloudPluginLoad = nil -- Desativa logo em seguida
+    
     if not ok or type(p) ~= "table" or not p.name then return nil, psrc end
     return p, psrc
 end
@@ -35,121 +40,97 @@ if fs.isDir(PLUGIN_DIR) then
         if file:match("%.lua$") then
             local path = PLUGIN_DIR .. "/" .. file
             local meta, src = loadPluginMeta(path)
-            if meta then
-                -- assign default priority
-                if meta.priority == nil then
-                    meta.priority = meta.patch and 1 or 10
-                end
-                table.insert(allPlugins, {meta=meta, src=src, path=path})
+            if src then
+                table.insert(allPlugins, { meta = meta, src = src, path = path })
             end
         end
     end
 end
 
--- sort by priority (lower = first)
-table.sort(allPlugins, function(a,b)
-    return (a.meta.priority or 10) < (b.meta.priority or 10)
+-- sort plugins by priority
+table.sort(allPlugins, function(a, b)
+    local pa = a.meta and a.meta.priority or (a.meta and a.meta.patch and 1 or 10)
+    local pb = b.meta and b.meta.priority or (b.meta and b.meta.patch and 1 or 10)
+    return pa < pb
 end)
 
--- ── Pre-boot plugins (priority 0) ─────────────────────────────────────────────
--- These run before the instance is built.
--- They receive a simple pre-boot API: { requestRestart, setRestartMsg }
--- If any sets needRestart=true, launcher shows a message and re-execs after.
-
-local needRestart   = false
-local restartMsg    = "Restart required to apply updates."
-local preBootCtx    = {
+-- ── Handle Priority 0 Plugins (Pre-Boot) ──────────────────────────────────────
+local context = {
+    restartRequested = false,
+    reason = "",
     requestRestart = function(msg)
-        needRestart = true
-        if msg then restartMsg = msg end
-    end,
+        context.restartRequested = true
+        context.reason = msg or "Plugin requested restart"
+    end
 }
 
-for _, entry in ipairs(allPlugins) do
-    if entry.meta.priority == 0 then
-        -- run in a protected call with the pre-boot context
-        local chunk = loadstring(entry.src, "@"..entry.path)
-        if chunk then
-            local ok, p = pcall(chunk)
-            if ok and type(p)=="table" and p.preBoot then
-                pcall(p.preBoot, preBootCtx)
-            end
+-- Execute priority 0 preBoot functions before stripping anything
+for _, p in ipairs(allPlugins) do
+    local prio = p.meta and p.meta.priority or (p.meta and p.meta.patch and 1 or 10)
+    if prio == 0 and p.meta.preBoot then
+        -- Execute a função preBoot de verdade com a trava ligada para o ambiente
+        _G._cloudPluginLoad = true
+        pcall(p.meta.preBoot, context)
+        _G._cloudPluginLoad = nil
+        
+        if context.restartRequested then
+            print(context.reason)
+            os.sleep(1)
+            -- re-run launcher to apply changes
+            os.queueEvent("timer", 0)
+            os.pullEvent("timer")
+            return shell.run(shell.getRunningProgram())
         end
     end
 end
 
--- ── If restart was requested, show prompt and relaunch ────────────────────────
-if needRestart then
-    term.setBackgroundColor(colors.black) term.clear()
-    term.setBackgroundColor(colors.orange) term.setTextColor(colors.black)
-    term.setCursorPos(1,1) term.clearLine()
-    term.write(" Restart Required")
-    term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
-    term.setCursorPos(1,3) term.write(restartMsg)
-    term.setCursorPos(1,5) term.setTextColor(colors.yellow)
-    term.write("[R] Restart now    [C] Continue anyway")
-    while true do
-        local ev,p1 = os.pullEvent("key")
-        if p1 == keys.r then
-            -- reboot the computer
-            os.reboot()
-        elseif p1 == keys.c then
-            break
-        end
-    end
-end
-
--- ── Read original cloud_user.lua ──────────────────────────────────────────────
+-- ── Read original source ──────────────────────────────────────────────────────
 local f = fs.open(CLOUD_USER, "r")
 local src = f.readAll()
 f.close()
 
--- ── Strip installer signature and final while loop ────────────────────────────
+-- ── Strip final while loop line by line ──────────────────────────────────────
 local lines = {}
 for line in (src .. "\n"):gmatch("([^\n]*)\n") do
     table.insert(lines, line)
 end
 
--- remove trailing blank lines and @installed signature
+-- Remove trailing blank lines and installer timestamps
 while #lines > 0 do
-    local last = lines[#lines]:gsub("%s+$","")
-    if last == "" or last:match("%-%-.-@installed:%d+") then
+    local lastLine = lines[#lines]:gsub("%s+$", "")
+    if lastLine == "" or lastLine:match("%-%-%-? ?@installed:%d+") then
         table.remove(lines)
-    else break end
+    else
+        break
+    end
 end
 
--- remove last 4 lines (while true do / doLogin() / if isAdmin... / end)
-for _ = 1, 4 do
-    if #lines > 0 then table.remove(lines) end
+-- expect last 4 lines: "end", "    if isAdmin...", "    doLogin()", "while true do"
+for _ = 1, 4 do 
+    if #lines > 0 then table.remove(lines) end 
 end
 local stripped = table.concat(lines, "\n")
 
 -- ── Build injected code ───────────────────────────────────────────────────────
 local inject = {}
-table.insert(inject, "\n-- === Cloud Launcher v4 injection ===")
-table.insert(inject, "local _plugins = {}")
 
--- inline all non-priority-0 plugins (priority 1+ go into instance)
-for _, entry in ipairs(allPlugins) do
-    if (entry.meta.priority or 10) > 0 then
+-- load all plugin files inline so they share the same scope
+table.insert(inject, "\n-- === Cloud Launcher injection ===")
+table.insert(inject, "local _plugins = {}")
+for _, p in ipairs(allPlugins) do
+    local prio = p.meta and p.meta.priority or (p.meta and p.meta.patch and 1 or 10)
+    if prio > 0 then -- skip pre-boot plugins from being registered in global menu
         table.insert(inject, "do")
         table.insert(inject, "  local _p = (function()")
-        table.insert(inject, entry.src)
+        table.insert(inject, p.src)
         table.insert(inject, "  end)()")
-        table.insert(inject, "  if type(_p)=='table' and _p.run and _p.name then")
-        table.insert(inject, "    _p._priority = " .. tostring(entry.meta.priority or 10))
-        table.insert(inject, "    table.insert(_plugins, _p)")
-        table.insert(inject, "  end")
+        table.insert(inject, "  if type(_p) == 'table' and _p.run and _p.name then table.insert(_plugins, _p) end")
         table.insert(inject, "end")
     end
 end
 
--- sort plugins by priority inside instance, then split patch vs menu
+-- separate plugins: patch plugins (no menu entry) vs menu plugins
 table.insert(inject, [[
-table.sort(_plugins, function(a,b)
-    return (a._priority or 10) < (b._priority or 10)
-end)
-
 local _menuPlugins  = {}
 local _patchPlugins = {}
 for _, p in ipairs(_plugins) do
@@ -160,7 +141,7 @@ for _, p in ipairs(_plugins) do
     end
 end
 
--- run patch plugins in priority order
+-- run patch plugins immediately (they modify globals like itemListUI)
 for _, p in ipairs(_patchPlugins) do p.run() end
 
 local _origUserMenu = userMenu
@@ -177,8 +158,7 @@ userMenu = function()
     table.insert(menuItems, { label="Logout", icon=colors.red })
     local logoutIdx = #menuItems
     while true do
-        local displayName = _G.cloudDisplayName or username
-        local sel = clickMenu("Cloud - " .. displayName, menuItems)
+        local sel = clickMenu("Cloud - " .. username, menuItems)
         if sel == nil or sel == logoutIdx then
             token=nil username=nil isAdmin=false return
         elseif sel == 1 then
@@ -203,6 +183,7 @@ userMenu = function()
 end
 ]])
 
+-- restore main loop
 table.insert(inject, "\nwhile true do")
 table.insert(inject, "    doLogin()")
 table.insert(inject, "    if isAdmin then adminMenu() else userMenu() end")
