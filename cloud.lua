@@ -25,18 +25,16 @@ local f = fs.open(CLOUD_USER, "r")
 local src = f.readAll()
 f.close()
 
--- ── Strip final while loop (we re-add it after injection) ────────────────────
-local loopPat = "while true do%s*\n%s*doLogin%(%)\n%s*if isAdmin then adminMenu%(%%) else userMenu%(%%) end%s*\nend"
-local stripped = src:gsub(loopPat, "")
-if stripped == src then
-    -- fallback: strip last 4 lines manually
-    local lines = {}
-    for line in src:gmatch("([^\n]*)\n?") do table.insert(lines, line) end
-    while #lines > 0 and (lines[#lines] == "" or lines[#lines]:find("^end") or lines[#lines]:find("doLogin") or lines[#lines]:find("while true")) do
-        table.remove(lines)
-    end
-    stripped = table.concat(lines, "\n")
+-- ── Strip final while loop line by line ──────────────────────────────────────
+local lines = {}
+for line in (src .. "\n"):gmatch("([^\n]*)\n") do
+    table.insert(lines, line)
 end
+-- remove trailing blank lines then the 3-line loop + its "end"
+while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
+-- expect last 4 lines: "end", "    if isAdmin...", "    doLogin()", "while true do"
+for _ = 1, 4 do table.remove(lines) end
+local stripped = table.concat(lines, "\n")
 
 -- ── Build injected code ───────────────────────────────────────────────────────
 local inject = {}
@@ -57,17 +55,30 @@ for _, path in ipairs(pluginFiles) do
     table.insert(inject, "end")
 end
 
--- replace userMenu
+-- separate plugins: patch plugins (no menu entry) vs menu plugins
 table.insert(inject, [[
+local _menuPlugins  = {}
+local _patchPlugins = {}
+for _, p in ipairs(_plugins) do
+    if p.patch then
+        table.insert(_patchPlugins, p)
+    else
+        table.insert(_menuPlugins, p)
+    end
+end
+
+-- run patch plugins immediately (they modify globals like itemListUI)
+for _, p in ipairs(_patchPlugins) do p.run() end
+
 local _origUserMenu = userMenu
 userMenu = function()
-    if #_plugins == 0 then _origUserMenu() return end
+    if #_menuPlugins == 0 then _origUserMenu() return end
     local menuItems = {
         { label="Withdraw", icon=colors.green },
         { label="Deposit",  icon=colors.blue  },
         { label="Log",      icon=colors.gray  },
     }
-    for _, p in ipairs(_plugins) do
+    for _, p in ipairs(_menuPlugins) do
         table.insert(menuItems, { label = p.label or p.name, icon = colors.purple })
     end
     table.insert(menuItems, { label="Logout", icon=colors.red })
@@ -92,7 +103,7 @@ userMenu = function()
             logScreen()
         else
             local idx = sel - 3
-            if _plugins[idx] then _plugins[idx].run() end
+            if _menuPlugins[idx] then _menuPlugins[idx].run() end
         end
     end
 end
