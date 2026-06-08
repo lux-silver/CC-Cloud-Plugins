@@ -6,47 +6,29 @@
 local plugin  = {}
 plugin.name   = "settings"
 plugin.label  = "Settings"
-plugin.patch  = false  -- appears as menu entry
+plugin.patch  = false  -- aparece na lista do menu principal
 
 -- ── Built-in: theme color ─────────────────────────────────────────────────────
--- Patches clickMenu to use the chosen header color
-
-local function applyTheme(c)
-    if not clickMenu then return end
-    local orig = _G._origClickMenu or clickMenu
-    _G._origClickMenu = orig
-    clickMenu = function(title, items, msg)
-        _G.cloudThemeColor = c
-        return orig(title, items, msg)
-    end
-end
-
--- Patch: intercept clickMenu header draw to use cloudThemeColor
 local function patchClickMenuColor()
-    -- CORREÇÃO: Se o clickMenu ainda não existir (tempo de boot), sai sem dar erro!
-    if not clickMenu then return end
+    -- Se o clickMenu ainda não existir na memória global, sai sem dar erro!
+    if not _G.clickMenu and not clickMenu then return end
     
-    -- Evita duplicar o proxy se já foi aplicado antes
-    if _G._patchedClickMenu then return end
-    _G._patchedClickMenu = true
-
-    local orig = clickMenu
+    local orig = _G.clickMenu or clickMenu
+    if _G._origClickMenu then return end -- evita aplicar o patch por cima de si mesmo
+    
     _G._origClickMenu = orig
-    clickMenu = function(title, items, msg)
+    _G.clickMenu = function(title, items, msg)
         return orig(title, items, msg)
     end
 end
 
 -- ── Main Screen ───────────────────────────────────────────────────────────────
 function plugin.run()
-    -- Tenta aplicar o patch de cor agora que o utilizador abriu o menu e a sandbox está pronta
+    -- Aplica o patch apenas na hora que o plugin é aberto de verdade
     patchClickMenuColor()
 
-    if not configAPI then
-        configAPI = _G.configAPI
-    end
-
-    if not configAPI then
+    local api = _G.configAPI or configAPI
+    if not api then
         term.setBackgroundColor(colors.black) term.clear()
         term.setCursorPos(1,2) term.setTextColor(colors.red)
         term.write("config_api.lua not found!")
@@ -56,18 +38,20 @@ function plugin.run()
         return
     end
 
-    configAPI.settingsScreen()
+    api.settingsScreen()
 end
 
 -- ── Self-register built-in settings (runs at load time) ──────────────────────
 local registered = false
 local _origRun = plugin.run
+
 plugin.run = function()
-    if not registered and configAPI then
+    local api = _G.configAPI or configAPI
+    if not registered and api then
         registered = true
 
         -- Theme color
-        configAPI.register({
+        api.register({
             plugin   = "Cloud Theme",
             key      = "theme.headerColor",
             label    = "Header Color",
@@ -75,13 +59,12 @@ plugin.run = function()
             default  = colors.blue,
             onChange = function(v)
                 _G.cloudThemeColor = v
-                -- Só chama o patch se o ambiente já estiver pronto
-                if clickMenu then patchClickMenuColor() end
+                patchClickMenuColor()
             end,
         })
 
         -- Log nickname
-        configAPI.register({
+        api.register({
             plugin   = "Cloud Theme",
             key      = "theme.nickname",
             label    = "Nickname",
