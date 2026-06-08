@@ -7,7 +7,6 @@ local plugin  = {}
 plugin.name   = "settings"
 plugin.label  = "Settings"
 plugin.patch  = false  -- appears as menu entry
-plugin.priority = 1
 
 -- ── Built-in: theme color ─────────────────────────────────────────────────────
 -- Patches clickMenu to use the chosen header color
