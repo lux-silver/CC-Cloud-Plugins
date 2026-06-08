@@ -4,23 +4,32 @@
 -- plugin.priority = 0  → runs before instance (pre-boot)
 -- plugin.patch    = true
 
+-- !! Mode check FIRST — before any code runs !!
+-- cloud.lua sets _G._cloudPluginLoad=true before loading plugins.
+-- If that flag is set we are being loaded as plugin, not run directly.
+-- Return the plugin table immediately skipping all UI code.
+local _isPlugin = _G._cloudPluginLoad == true
+
 local plugin   = {}
 plugin.name     = "installer"
 plugin.label    = "installer"
 plugin.patch    = true
 plugin.priority = 0
 
--- ── Pre-boot: silent update check ────────────────────────────────────────────
+local silentCheck  -- forward declared, assigned below
+
 function plugin.preBoot(ctx)
-    -- silent check: compare timestamps, request restart if anything changed
-    local updated = silentCheck()  -- defined below
-    if updated > 0 then
-        ctx.requestRestart("Updates applied ("..updated.." file(s)). Restart to use new version.")
+    if silentCheck then
+        local updated = silentCheck()
+        if updated > 0 then
+            ctx.requestRestart("Updates applied ("..updated.." file(s)). Restart to apply.")
+        end
     end
 end
 
--- plugin.run is never called (priority 0 / patch)
 function plugin.run() end
+
+if _isPlugin then return plugin end
 
 local REPO     = "lux-silver/CC-Cloud-Plugins"
 local BRANCH   = "main"
