@@ -1,4 +1,4 @@
--- Settings Plugin v1 (CORRIGIDO)
+-- Settings Plugin v1 (CORRIGIDO PARA MENU PRINCIPAL)
 -- Menu plugin: opens settings screen with all registered configs
 -- Also registers built-in settings: theme color + log nickname
 -- Place at: plugins/settings.lua
@@ -6,27 +6,25 @@
 local plugin  = {}
 plugin.name   = "settings"
 plugin.label  = "Settings"
-plugin.patch  = false  -- aparece como entrada no menu
+plugin.patch  = true   -- AGORA É TRUE: Injeta logo no boot do sistema!
+plugin.priority = 2    -- Roda logo a seguir à config_api
 
--- ── Patch Real: Interceta o clickMenu para injetar a cor customizada ──────────
+-- ── Patch Real: Intercetar o clickMenu global no momento do boot ──────────────
 local function patchClickMenuColor()
-    -- Procura o clickMenu no ambiente correto (global ou local injetado)
+    -- Procura o clickMenu onde quer que ele esteja
     local target = _G.clickMenu or clickMenu
     if not target then return end
-    if _G._origClickMenu then return end -- evita loops infinitos se chamado várias vezes
+    if _G._origClickMenu then return end -- Evita duplicar o patch
 
-    -- Guarda o ponteiro original para podermos chamar depois
     _G._origClickMenu = target
     
-    -- Substitui a função global por um hook dinâmico
+    -- Substitui a função global para que afete o menu principal e secundários
     _G.clickMenu = function(title, items, msg)
-        -- Guardamos a função original de mudar a cor de fundo do terminal
         local origSetBG = term.setBackgroundColor
         
-        -- Substituímos temporariamente o term.setBackgroundColor do computador
+        -- Substitui temporariamente o term.setBackgroundColor do terminal inteiro
         term.setBackgroundColor = function(color)
-            -- Sempre que o menu original tentar pintar algo com AZUL (cabeçalho)
-            -- e nós tivermos uma cor escolhida nas definições, usamos a nossa cor!
+            -- Se o menu tentar pintar com azul padrão e houver cor customizada guardada:
             if color == colors.blue and _G.cloudThemeColor then
                 origSetBG(_G.cloudThemeColor)
             else
@@ -34,27 +32,23 @@ local function patchClickMenuColor()
             end
         end
 
-        -- Executa o menu original completo com o nosso modificador ativo
+        -- Executa o menu original (Menu Principal, Vault, Log, etc.) com a nova cor
         local res = _G._origClickMenu(title, items, msg)
 
-        -- Assim que o menu fecha, devolvemos a função original ao terminal
+        -- Devolve a função original ao terminal após o menu fechar
         term.setBackgroundColor = origSetBG
         return res
     end
 end
 
--- ── Main Screen ───────────────────────────────────────────────────────────────
+-- Como agora o patch=true roda automaticamente no boot, usamos a run() 
+-- apenas quando o utilizador clica fisicamente no botão "Settings" do menu
 function plugin.run()
-    -- Garante que o patch é aplicado quando entramos no plugin
-    patchClickMenuColor()
-
     local api = _G.configAPI or configAPI
     if not api then
         term.setBackgroundColor(colors.black) term.clear()
         term.setCursorPos(1,2) term.setTextColor(colors.red)
         term.write("config_api.lua not found!")
-        term.setCursorPos(1,4) term.setTextColor(colors.gray)
-        term.write("Add plugins/config_api.lua")
         os.pullEvent("key")
         return
     end
@@ -62,11 +56,11 @@ function plugin.run()
     api.settingsScreen()
 end
 
--- ── Self-register built-in settings (runs at load time) ──────────────────────
+-- ── Self-register built-in settings (Corre imediatamente no boot) ─────────────
 local registered = false
-local _origRun = plugin.run
 
-plugin.run = function()
+-- Esta função vai ser injetada pelo Cloud Launcher no carregamento dos plugins
+local function initSettings()
     local api = _G.configAPI or configAPI
     if not registered and api then
         registered = true
@@ -80,7 +74,7 @@ plugin.run = function()
             default  = colors.blue,
             onChange = function(v)
                 _G.cloudThemeColor = v
-                patchClickMenuColor() -- Atualiza o injetor imediatamente
+                patchClickMenuColor() -- Atualiza as cores do gancho imediatamente
             end,
         })
 
@@ -95,8 +89,13 @@ plugin.run = function()
                 _G.cloudDisplayName = (v and v ~= "") and v or nil
             end,
         })
+        
+        -- Aplica o patch inicial com a cor recuperada do ficheiro de configuração
+        patchClickMenuColor()
     end
-    _origRun()
 end
+
+-- Forçamos a execução do gancho assim que o ficheiro é lido pelo Launcher
+pcall(initSettings)
 
 return plugin
