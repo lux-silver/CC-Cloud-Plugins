@@ -68,6 +68,7 @@ local function itemListUI(cfg)
     local message     = ""
     local msgTimer    = 0
     local fetchErr    = nil
+    local shiftHeld   = false
 
     local LIST_TOP = 2
     local function listBot()  return H - 3 end
@@ -175,7 +176,7 @@ local function itemListUI(cfg)
                     term.write(("Click again to confirm (" .. (item.displayName or item.name) .. ")"):sub(1, W))
                 end
             else
-                term.setTextColor(colors.gray) term.write("Click item to select  Q=back")
+                term.setTextColor(colors.gray) term.write("RClick=full stack  Q=back")
             end
         end
         term.setCursorPos(1, H) term.setBackgroundColor(colors.black) term.write(string.rep(" ", W))
@@ -213,7 +214,7 @@ local function itemListUI(cfg)
     while true do
         draw()
         local ev, p1, p2, p3 = os.pullEvent()
-        if ev == "term_resize" then W, H = term.getSize()
+        if ev == "term_resize" then W, H = term.getSize() shiftHeld = false
         elseif searchMode then
             if ev == "char" then searchQuery = searchQuery .. p1 applyFilter()
             elseif ev == "key" then
@@ -229,7 +230,12 @@ local function itemListUI(cfg)
                 local idx = rowToIdx(my)
                 if idx then
                     local item = filtered[idx]
-                    if idx == selIdx then doAction(item)
+                    if p1 == 2 then
+                        -- right click: instant full stack
+                        selAmt[item.name] = math.min(64, item.count)
+                        selIdx = idx
+                        doAction(item)
+                    elseif idx == selIdx then doAction(item)
                     else
                         selIdx = idx
                         if not selAmt[item.name] then selAmt[item.name] = 1 end
@@ -254,6 +260,8 @@ local function itemListUI(cfg)
                     if selIdx then selIdx = nil else return end
                 elseif p1 == keys.r then doFetch() applyFilter() message = "Refreshed" msgTimer = os.clock() + 1
                 elseif p1 == keys.slash then searchMode = true searchQuery = "" applyFilter() end
+            elseif ev == "key_up" then
+                if p1 == keys.leftShift or p1 == keys.rightShift then shiftHeld = false end
             end
         end
     end
@@ -292,7 +300,7 @@ local function logScreen()
         term.setBackgroundColor(colors.black) term.setTextColor(colors.gray) term.write("  Q=back")
         term.setCursorPos(1, H) term.setBackgroundColor(colors.black) term.write(string.rep(" ", W))
         local ev, p1, p2, p3 = os.pullEvent()
-        if ev == "term_resize" then W, H = term.getSize()
+        if ev == "term_resize" then W, H = term.getSize() shiftHeld = false
         elseif ev == "mouse_click" then
             local mx, my = p2, p3
             if (my == 1 and mx >= W - 2) or (my == H - 1 and mx <= 8) then return end
@@ -334,7 +342,7 @@ local function clickMenu(title, items, msg)
             term.setTextColor(colors.gray) term.write("Click to select  Q=back")
         end
         local ev, p1, p2, p3 = os.pullEvent()
-        if ev == "term_resize" then W, H = term.getSize()
+        if ev == "term_resize" then W, H = term.getSize() shiftHeld = false
         elseif ev == "mouse_click" then
             local mx, my = p2, p3
             if my == 1 and mx >= W - 2 then return nil end
@@ -405,7 +413,7 @@ local function pickUser()
             term.setCursorPos(W, H) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v")
         end
         local ev, p1, p2, p3 = os.pullEvent()
-        if ev == "term_resize" then W, H = term.getSize()
+        if ev == "term_resize" then W, H = term.getSize() shiftHeld = false
         elseif ev == "mouse_click" then
             local mx, my = p2, p3
             if my == 1 and mx >= W - 2 then return nil end
