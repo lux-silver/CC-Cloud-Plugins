@@ -14,7 +14,7 @@ local plugin   = {}
 plugin.name     = "installer"
 plugin.label    = "installer"
 plugin.patch    = true
-plugin.priority = 1
+plugin.priority = 0
 
 local silentCheck  -- forward declared, assigned below
 
