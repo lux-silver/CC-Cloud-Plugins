@@ -33,7 +33,7 @@ end
 
 -- CORRECTION: Clear empty lines and the installer's signature before cutting the 4 lines.
 while #lines > 0 do
-    local lastLine = lines[#lines]:gsub("%s+$", "") -- remove espaços em branco
+    local lastLine = lines[#lines]:gsub("%s+$", "") -- remove whitespace
     if lastLine == "" or lastLine:match("%-%-%-? ?@installed:%d+") then
         table.remove(lines)
     else
