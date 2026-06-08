@@ -1,7 +1,7 @@
 -- Config API Plugin v2
 -- patch plugin: injects global "configAPI"
 -- Saves per-plugin configs in config/pluginname.cfg
--- Applies onChange on boot
+-- Applies all onChange callbacks on boot automatically
 
 local plugin  = {}
 plugin.name   = "config_api"
@@ -14,68 +14,84 @@ function plugin.run()
 local CFG_DIR = "config"
 
 -- ── Storage ───────────────────────────────────────────────────────────────────
-local function cfgPath(pname)
-    return CFG_DIR.."/"..pname:lower():gsub("[^a-z0-9_]","_")..".cfg"
+local function cfgPath(pluginName)
+    local safe = pluginName:lower():gsub("[^a-z0-9_]","_")
+    return CFG_DIR .. "/" .. safe .. ".cfg"
 end
-local function loadCfg(pname)
-    local db={}
-    local path=cfgPath(pname)
+
+local function loadCfg(pluginName)
+    local db = {}
+    local path = cfgPath(pluginName)
     if not fs.exists(path) then return db end
-    local f=fs.open(path,"r")
+    local f = fs.open(path, "r")
     while true do
-        local line=f.readLine() if not line then break end
-        local k,v=line:match("^([^=]+)=(.*)$")
-        if k then db[k]=v end
+        local line = f.readLine()
+        if not line then break end
+        local k, v = line:match("^([^=]+)=(.*)$")
+        if k then db[k] = v end
     end
-    f.close() return db
+    f.close()
+    return db
 end
-local function saveCfg(pname,db)
+
+local function saveCfg(pluginName, db)
     if not fs.isDir(CFG_DIR) then fs.makeDir(CFG_DIR) end
-    local f=fs.open(cfgPath(pname),"w")
-    for k,v in pairs(db) do f.writeLine(k.."="..tostring(v)) end
+    local f = fs.open(cfgPath(pluginName), "w")
+    for k, v in pairs(db) do f.writeLine(k .. "=" .. tostring(v)) end
     f.close()
 end
+
 local function parseVal(v)
-    if v=="true" then return true end
-    if v=="false" then return false end
-    local n=tonumber(v) if n then return n end
+    if v == "true"  then return true  end
+    if v == "false" then return false end
+    local n = tonumber(v)
+    if n then return n end
     return v
 end
 
 -- ── Registry ──────────────────────────────────────────────────────────────────
-local registry={}
-local byKey={}
-local cfgCache={}
+local registry  = {}   -- ordered list of entries
+local byKey     = {}   -- byKey[key] = entry
+local cfgCache  = {}   -- cfgCache[pluginName] = {key=val,...}
 
-local function getCache(pname)
-    if not cfgCache[pname] then cfgCache[pname]=loadCfg(pname) end
-    return cfgCache[pname]
+local function getCache(pluginName)
+    if not cfgCache[pluginName] then
+        cfgCache[pluginName] = loadCfg(pluginName)
+    end
+    return cfgCache[pluginName]
 end
 
 local function register(entry)
     if byKey[entry.key] then return end
-    local raw=getCache(entry.plugin)[entry.key]
-    entry.value = raw~=nil and parseVal(raw) or entry.default
-    entry.onChange = entry.onChange or function() end
-    pcall(entry.onChange, entry.value)
-    table.insert(registry,entry)
-    byKey[entry.key]=entry
+    local cache = getCache(entry.plugin)
+    local raw   = cache[entry.key]
+    entry.value = raw ~= nil and parseVal(raw) or entry.default
+    if entry.onChange then
+        pcall(entry.onChange, entry.value)  -- apply on boot
+    else
+        entry.onChange = function() end
+    end
+    table.insert(registry, entry)
+    byKey[entry.key] = entry
 end
 
 local function get(key)
-    local e=byKey[key] return e and e.value or nil
-end
-local function set(key,value)
-    local e=byKey[key] if not e then return end
-    e.value=value
-    local cache=getCache(e.plugin)
-    cache[e.key]=tostring(value)
-    saveCfg(e.plugin,cache)
-    pcall(e.onChange,value)
+    local e = byKey[key]
+    return e and e.value or nil
 end
 
--- ── Colors ────────────────────────────────────────────────────────────────────
-local COLOR_LIST={
+local function set(key, value)
+    local e = byKey[key]
+    if not e then return end
+    e.value = value
+    local cache = getCache(e.plugin)
+    cache[e.key] = tostring(value)
+    saveCfg(e.plugin, cache)
+    pcall(e.onChange, value)
+end
+
+-- ── Color list ────────────────────────────────────────────────────────────────
+local COLOR_LIST = {
     {name="Blue",      c=colors.blue     },
     {name="Red",       c=colors.red      },
     {name="Green",     c=colors.green    },
@@ -89,86 +105,80 @@ local COLOR_LIST={
     {name="Lime",      c=colors.lime     },
     {name="Brown",     c=colors.brown    },
 }
-local function colorName(c)
-    for _,col in ipairs(COLOR_LIST) do if col.c==c then return col.name end end
-    return "?"
+local function colorByVal(c)
+    for _,col in ipairs(COLOR_LIST) do if col.c==c then return col end end
+    return COLOR_LIST[1]
 end
 
--- ── Widgets (all values forced to string where needed) ───────────────────────
-local function drawSlider(x,y,w,value,minV,maxV,step,col)
-    local trackW=math.max(2,w-8)
-    local range=maxV-minV
-    local filled=range>0 and math.floor((value-minV)/range*trackW) or 0
-    filled=math.max(0,math.min(filled,trackW))
-    term.setCursorPos(x,y)
+-- ── Widgets ───────────────────────────────────────────────────────────────────
+local function drawSlider(x, y, w, value, minV, maxV, step, col)
+    local trackW = math.max(2, w - 8)
+    local range  = maxV - minV
+    local filled = range>0 and math.floor((value-minV)/range*trackW) or 0
+    filled = math.max(0, math.min(filled, trackW))
+    term.setCursorPos(x, y)
     term.setBackgroundColor(colors.black) term.setTextColor(colors.white) term.write("[")
     term.setTextColor(colors.lightGray) term.write("<")
     term.setBackgroundColor(col or colors.blue) term.setTextColor(col or colors.blue)
-    term.write(string.rep(" ",filled))
+    term.write(string.rep(" ", filled))
     term.setBackgroundColor(colors.gray) term.setTextColor(colors.gray)
-    term.write(string.rep(" ",trackW-filled))
+    term.write(string.rep(" ", trackW-filled))
     term.setBackgroundColor(colors.black) term.setTextColor(colors.lightGray) term.write(">")
     term.setTextColor(colors.gray) term.write("]")
     term.setTextColor(colors.yellow) term.write(" "..tostring(value))
-    return {row=y,decX=x+1,incX=x+2+trackW,trackX1=x+2,trackX2=x+1+trackW,trackW=trackW}
+    return {row=y, decX=x+1, incX=x+2+trackW, trackX1=x+2, trackX2=x+1+trackW, trackW=trackW}
 end
 
-local function drawCheckbox(x,y,value,label)
-    term.setCursorPos(x,y) term.setBackgroundColor(colors.black)
+local function drawCheckbox(x, y, value, label)
+    term.setCursorPos(x, y) term.setBackgroundColor(colors.black)
     if value then term.setTextColor(colors.lime) term.write("[x] ")
     else          term.setTextColor(colors.gray) term.write("[ ] ") end
-    term.setTextColor(colors.white) term.write(tostring(label or ""))
-    return {row=y,x1=x,x2=x+3}
+    term.setTextColor(colors.white) term.write(label or "")
+    return {row=y, x1=x, x2=x+3}
 end
 
-local function drawTextbox(x,y,w,value,focused,label)
-    -- value always string
-    local str=tostring(value or "")
-    if label and label~="" then
-        term.setCursorPos(x,y) term.setBackgroundColor(colors.black)
+local function drawTextbox(x, y, w, value, focused, label)
+    term.setCursorPos(x, y) term.setBackgroundColor(colors.black)
+    if label then
         term.setTextColor(colors.white) term.write(label..": ")
-        x=x+#label+2 w=w-#label-2
+        x = x + #label + 2  w = w - #label - 2
     end
-    term.setCursorPos(x,y)
+    term.setCursorPos(x, y)
     term.setBackgroundColor(focused and colors.gray or colors.black)
     term.setTextColor(colors.white)
-    local avail=math.max(1,w-3)
-    local disp=str:sub(-avail)
-    local pad=math.max(0,avail-#disp)
-    term.write("["..disp..(focused and "_" or " ")..string.rep(" ",pad).."]")
-    return {row=y,x1=x,x2=x+w-1}
+    local disp = (value or ""):sub(-(w-3))
+    term.write("["..disp..(focused and "_" or " ")..string.rep(" ", math.max(0,w-#disp-3)).."]")
+    return {row=y, x1=x, x2=x+w-1}
 end
 
-local function drawColorPicker(x,y,cur)
-    for i,col in ipairs(COLOR_LIST) do
-        term.setCursorPos(x+i-1,y)
+local function drawColorPicker(x, y, cur)
+    term.setCursorPos(x, y)
+    for i, col in ipairs(COLOR_LIST) do
+        term.setCursorPos(x+i-1, y)
         term.setBackgroundColor(col.c) term.setTextColor(colors.white)
         term.write(col.c==cur and "*" or " ")
     end
     term.setBackgroundColor(colors.black) term.setTextColor(colors.yellow)
-    term.write(" "..colorName(cur))
-    return {row=y,x1=x,x2=x+#COLOR_LIST-1}
+    term.write("  "..colorByVal(cur).name)
+    return {row=y, x1=x, x2=x+#COLOR_LIST-1}
 end
 
--- ── Settings screen ───────────────────────────────────────────────────────────
--- Layout: plugin list (like main menu) → click plugin → its settings page → back
--- No horizontal tabs. Each plugin is a full page.
-
+-- ── Settings screen — one page per plugin, full screen each ──────────────────
 local function settingsScreen()
-    local W,H=term.getSize()
+    local W,H = term.getSize()
 
-    -- gather plugins
-    local plugNames={}
-    local plugMap={}
-    for _,e in ipairs(registry) do
+    -- gather plugin names
+    local plugNames = {}
+    local plugMap   = {}
+    for _, e in ipairs(registry) do
         if not plugMap[e.plugin] then
-            table.insert(plugNames,e.plugin)
-            plugMap[e.plugin]={}
+            table.insert(plugNames, e.plugin)
+            plugMap[e.plugin] = {}
         end
-        table.insert(plugMap[e.plugin],e)
+        table.insert(plugMap[e.plugin], e)
     end
 
-    if #plugNames==0 then
+    if #plugNames == 0 then
         term.setBackgroundColor(colors.black) term.clear()
         term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine() term.write(" Settings")
@@ -180,199 +190,215 @@ local function settingsScreen()
         return
     end
 
-    -- ── Plugin list page (like main menu) ─────────────────────────────────────
-    local function drawPluginList()
-        W,H=term.getSize()
-        term.setBackgroundColor(colors.black) term.clear()
+    local tabIdx   = 1
+    local focusIdx = nil
+    local pageScroll = 0
+
+    local function entries() return plugMap[plugNames[tabIdx]] or {} end
+
+    -- tab bar widths
+    local function tabRanges()
+        local ranges = {}
+        local x = 1
+        for i, name in ipairs(plugNames) do
+            local short = name:sub(1,9)
+            ranges[i] = {x1=x, x2=x+#short+1, name=short}
+            x = x + #short + 2
+        end
+        return ranges
+    end
+
+    local function drawHeader()
+        W,H = term.getSize()
+        -- row 1: title + [X]
         term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         term.write(" Settings")
         term.setCursorPos(W-2,1) term.write("[X]")
-        for i,name in ipairs(plugNames) do
-            local row=i+2
-            if row>H-1 then break end
-            term.setCursorPos(1,row)
-            term.setBackgroundColor(colors.purple) term.setTextColor(colors.black)
-            term.write(" ")
-            term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
-            term.write(" "..name..string.rep(" ",W-#name-2))
-        end
-        term.setCursorPos(1,H) term.setBackgroundColor(colors.black)
-        term.setTextColor(colors.gray) term.write("[Q] back")
-    end
 
-    -- ── Single plugin config page ─────────────────────────────────────────────
-    local function pluginPage(pname)
-        local ents=plugMap[pname] or {}
-        local focusIdx=nil
-        local scroll=0
-
-        local CONTENT_TOP=4   -- first content row
-        local function maxScroll()
-            return math.max(0,#ents - math.floor((H-CONTENT_TOP)/3))
-        end
-
-        local function draw()
-            W,H=term.getSize()
-            term.setBackgroundColor(colors.black) term.clear()
-            -- header
-            term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
-            term.setCursorPos(1,1) term.clearLine()
-            term.write(" "..pname)
-            term.setCursorPos(W-2,1) term.write("[X]")
-            -- breadcrumb
-            term.setCursorPos(1,2) term.setBackgroundColor(colors.black)
-            term.setTextColor(colors.gray) term.clearLine()
-            term.write(" Settings > "..pname)
-            -- divider
-            term.setCursorPos(1,3) term.setTextColor(colors.gray)
-            term.write(string.rep("-",W))
-
-            local visY=CONTENT_TOP
-            for idx=1+scroll,#ents do
-                local e=ents[idx]
-                if visY>H-2 then break end
-
-                -- label
-                term.setCursorPos(1,visY) term.setBackgroundColor(colors.black)
-                term.setTextColor(colors.lightGray) term.clearLine()
-                term.write(" "..e.label..":")
-                visY=visY+1
-                if visY>H-2 then break end
-
-                -- widget
-                term.setCursorPos(1,visY) term.setBackgroundColor(colors.black)
-                term.clearLine()
-                if e.type=="checkbox" then
-                    drawCheckbox(3,visY,e.value,"")
-                elseif e.type=="text" then
-                    drawTextbox(3,visY,W-2,e.value,focusIdx==idx,"")
-                elseif e.type=="color" then
-                    drawColorPicker(3,visY,e.value)
-                elseif e.type=="slider" then
-                    drawSlider(3,visY,W-2,e.value,e.min,e.max,e.step or 1,e.sliderColor)
-                end
-                visY=visY+2
-            end
-
-            -- scroll arrows
-            if scroll>0 then
-                term.setCursorPos(W,CONTENT_TOP)
-                term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^")
-            end
-            if scroll<maxScroll() then
-                term.setCursorPos(W,H-2)
-                term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v")
-            end
-
-            -- hint
-            term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black)
-            term.setTextColor(colors.gray) term.clearLine()
-            if focusIdx then
-                term.setTextColor(colors.yellow) term.write(" Typing... [Enter]=done [Bksp]=delete")
+        -- row 2: tabs
+        term.setCursorPos(1,2) term.setBackgroundColor(colors.black) term.clearLine()
+        local ranges = tabRanges()
+        for i, r in ipairs(ranges) do
+            term.setCursorPos(r.x1, 2)
+            if i==tabIdx then
+                term.setBackgroundColor(colors.gray) term.setTextColor(colors.yellow)
             else
-                term.write(" Click to change  [Q]=back")
+                term.setBackgroundColor(colors.black) term.setTextColor(colors.lightGray)
             end
-            term.setCursorPos(1,H) term.clearLine()
+            term.write(" "..r.name.." ")
         end
 
-        -- hit test: returns entry index and whether it's on widget row
-        local function hitEntry(mx,my)
-            local visY=CONTENT_TOP
-            for idx=1+scroll,#ents do
-                if visY>H-2 then break end
-                local labelRow=visY
-                local widgetRow=visY+1
-                if my==labelRow or my==widgetRow then
-                    return idx, my==widgetRow
-                end
-                visY=visY+3
+        -- row 3: plugin full name subtitle
+        term.setCursorPos(1,3) term.setBackgroundColor(colors.black) term.clearLine()
+        term.setTextColor(colors.gray) term.write(" "..plugNames[tabIdx])
+
+        -- divider row 4
+        term.setCursorPos(1,4) term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
+        term.write(string.rep("-",W))
+    end
+
+    local function drawPage()
+        W,H = term.getSize()
+        term.setBackgroundColor(colors.black) term.clear()
+        drawHeader()
+
+        local ents = entries()
+        local startRow = 5
+        local maxRow   = H - 2
+
+        -- draw entries starting at pageScroll
+        local visY = startRow
+        for idx = 1+pageScroll, #ents do
+            local e = ents[idx]
+            if visY > maxRow then break end
+
+            -- label row
+            term.setCursorPos(1, visY) term.setBackgroundColor(colors.black) term.clearLine()
+            term.setTextColor(colors.white) term.write(" "..e.label)
+            visY = visY + 1
+            if visY > maxRow then break end
+
+            -- widget row
+            term.setCursorPos(1, visY) term.setBackgroundColor(colors.black) term.clearLine()
+            local wx = 3
+
+            if e.type == "slider" then
+                drawSlider(wx, visY, W-wx, e.value, e.min, e.max, e.step or 1, e.sliderColor)
+            elseif e.type == "color" then
+                drawColorPicker(wx, visY, e.value)
+            elseif e.type == "checkbox" then
+                drawCheckbox(wx, visY, e.value, "")
+            elseif e.type == "text" then
+                drawTextbox(wx, visY, W-wx, e.value, focusIdx==idx+pageScroll, "")
             end
-            return nil,false
+            visY = visY + 2  -- gap between settings
         end
 
-        while true do
-            draw()
-            local ev,p1,p2,p3=os.pullEvent()
+        -- scroll indicators
+        if pageScroll > 0 then
+            term.setCursorPos(W,5) term.setBackgroundColor(colors.gray)
+            term.setTextColor(colors.white) term.write("^")
+        end
+        if 1+pageScroll+math.floor((maxRow-startRow)/3) <= #ents then
+            term.setCursorPos(W,maxRow) term.setBackgroundColor(colors.gray)
+            term.setTextColor(colors.white) term.write("v")
+        end
 
-            if ev=="term_resize" then W,H=term.getSize()
-            elseif ev=="key" then
-                if p1==keys.q or p1==keys.escape then
-                    if focusIdx then focusIdx=nil
-                    else return end
-                elseif p1==keys.enter then focusIdx=nil
-                elseif p1==keys.backspace and focusIdx then
-                    local e=ents[focusIdx]
-                    if e and e.type=="text" then
-                        set(e.key, tostring(e.value or ""):sub(1,-2))
-                    end
-                end
-            elseif ev=="char" then
-                if focusIdx then
-                    local e=ents[focusIdx]
-                    if e and e.type=="text" then
-                        set(e.key, tostring(e.value or "")..p1)
-                    end
-                end
-            elseif ev=="mouse_scroll" then
-                scroll=math.max(0,math.min(scroll+p1,maxScroll()))
-            elseif ev=="mouse_click" then
-                local mx,my=p2,p3
-                if my==1 and mx>=W-2 then return end
-                local idx,onWidget=hitEntry(mx,my)
-                if idx then
-                    local e=ents[idx]
-                    if e.type=="checkbox" then
-                        set(e.key, not e.value)
-                    elseif e.type=="text" then
-                        focusIdx=idx
-                    elseif e.type=="color" and onWidget then
-                        local ci=mx-3+1
-                        if ci>=1 and ci<=#COLOR_LIST then
-                            set(e.key,COLOR_LIST[ci].c)
-                        end
-                    elseif e.type=="slider" and onWidget then
-                        local trackW=math.max(2,W-2-8)
-                        local tx1=3+2 local tx2=tx1+trackW-1
-                        local step=e.step or 1
-                        if mx==tx1-1 then
-                            set(e.key,math.max(e.min,e.value-step))
-                        elseif mx==tx2+1 then
-                            set(e.key,math.min(e.max,e.value+step))
-                        elseif mx>=tx1 and mx<=tx2 then
-                            local frac=(mx-tx1)/(tx2-tx1)
-                            local v=e.min+math.floor(frac*(e.max-e.min)/step+0.5)*step
-                            set(e.key,math.max(e.min,math.min(e.max,v)))
-                        end
-                    end
-                end
-            end
+        -- bottom hint
+        term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.gray) term.clearLine()
+        term.write(" [Q]back  click to change")
+        term.setCursorPos(1,H) term.clearLine()
+        if focusIdx then
+            term.setTextColor(colors.yellow) term.write(" Typing... Enter=done Bksp=delete")
         end
     end
 
-    -- ── Plugin list loop ──────────────────────────────────────────────────────
+    -- ── hit test ──────────────────────────────────────────────────────────────
+    local function hitTab(mx,my)
+        if my~=2 then return nil end
+        for i,r in ipairs(tabRanges()) do
+            if mx>=r.x1 and mx<=r.x2 then return i end
+        end
+        return nil
+    end
+
+    local function hitEntry(mx,my)
+        -- returns entry index (in current tab) or nil
+        local ents = entries()
+        local visY = 5
+        for idx = 1+pageScroll, #ents do
+            local e = ents[idx]
+            if visY+1 > H-2 then break end
+            -- label on visY, widget on visY+1
+            if my == visY or my == visY+1 then return idx, e, my==(visY+1) end
+            visY = visY + 3
+        end
+        return nil
+    end
+
+    -- ── main loop ─────────────────────────────────────────────────────────────
     while true do
-        drawPluginList()
-        local ev,p1,p2,p3=os.pullEvent()
-        if ev=="key" and (p1==keys.q or p1==keys.escape) then return end
-        if ev=="mouse_click" then
-            local mx,my=p2,p3
+        drawPage()
+        local ev,p1,p2,p3 = os.pullEvent()
+
+        if ev=="term_resize" then W,H=term.getSize()
+
+        elseif ev=="key" then
+            if p1==keys.q or p1==keys.escape then
+                if focusIdx then focusIdx=nil
+                else return end
+            elseif p1==keys.tab then
+                tabIdx = tabIdx % #plugNames + 1
+                focusIdx=nil pageScroll=0
+            elseif p1==keys.enter then
+                focusIdx=nil
+            elseif p1==keys.backspace and focusIdx then
+                local e = entries()[focusIdx]
+                if e and e.type=="text" then
+                    set(e.key, (e.value or ""):sub(1,-2))
+                end
+            end
+
+        elseif ev=="char" then
+            if focusIdx then
+                local e = entries()[focusIdx]
+                if e and e.type=="text" then
+                    set(e.key, (e.value or "")..p1)
+                end
+            end
+
+        elseif ev=="mouse_scroll" then
+            pageScroll = math.max(0, pageScroll + p1)
+
+        elseif ev=="mouse_click" then
+            local btn,mx,my = p1,p2,p3
+            -- [X] close
             if my==1 and mx>=W-2 then return end
-            local idx=my-2
-            if idx>=1 and idx<=#plugNames then
-                pluginPage(plugNames[idx])
+            -- tab
+            local ti = hitTab(mx,my)
+            if ti then tabIdx=ti focusIdx=nil pageScroll=0 end
+
+            local idx, e, onWidget = hitEntry(mx,my)
+            if idx and e and onWidget then
+                if e.type=="checkbox" then
+                    set(e.key, not e.value)
+                elseif e.type=="text" then
+                    focusIdx = idx
+                elseif e.type=="color" then
+                    local ci = mx - 2  -- wx=3 → ci=mx-3+1
+                    ci = mx - 3 + 1
+                    if ci>=1 and ci<=#COLOR_LIST then
+                        set(e.key, COLOR_LIST[ci].c)
+                    end
+                elseif e.type=="slider" then
+                    local trackW = math.max(2, W-3-8)
+                    local tx1 = 3+2  local tx2 = tx1+trackW-1
+                    local decX = tx1-1  local incX = tx2+1
+                    local step = e.step or 1
+                    if mx==decX then
+                        set(e.key, math.max(e.min, e.value-step))
+                    elseif mx==incX then
+                        set(e.key, math.min(e.max, e.value+step))
+                    elseif mx>=tx1 and mx<=tx2 then
+                        local frac = (mx-tx1)/(tx2-tx1)
+                        local v = e.min + math.floor(frac*(e.max-e.min)/step+0.5)*step
+                        set(e.key, math.max(e.min, math.min(e.max,v)))
+                    end
+                end
             end
         end
     end
 end
 
--- ── Expose global ─────────────────────────────────────────────────────────────
-configAPI={
-    register=register,
-    get=get,
-    set=set,
-    settingsScreen=settingsScreen,
-    colors=COLOR_LIST,
+-- ── Expose configAPI global ───────────────────────────────────────────────────
+configAPI = {
+    register       = register,
+    get            = get,
+    set            = set,
+    settingsScreen = settingsScreen,
+    colors         = COLOR_LIST,
 }
 
 end -- plugin.run
