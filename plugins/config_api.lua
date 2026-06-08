@@ -146,7 +146,7 @@ local function drawTextbox(x, y, w, value, focused, label)
     term.setCursorPos(x, y)
     term.setBackgroundColor(focused and colors.gray or colors.black)
     term.setTextColor(colors.white)
-    local disp = (value or ""):sub(-(w-3))
+    local disp = tostring(value or ""):sub(-(w-3))
     term.write("["..disp..(focused and "_" or " ")..string.rep(" ", math.max(0,w-#disp-3)).."]")
     return {row=y, x1=x, x2=x+w-1}
 end
