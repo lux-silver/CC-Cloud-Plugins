@@ -30,10 +30,22 @@ local lines = {}
 for line in (src .. "\n"):gmatch("([^\n]*)\n") do
     table.insert(lines, line)
 end
--- remove trailing blank lines then the 3-line loop + its "end"
-while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
+
+-- CORREÇÃO: Limpa linhas vazias e a assinatura do instalador antes do corte das 4 linhas
+while #lines > 0 do
+    local lastLine = lines[#lines]:gsub("%s+$", "") -- remove espaços em branco
+    if lastLine == "" or lastLine:match("%-%-%-? ?@installed:%d+") then
+        table.remove(lines)
+    else
+        break
+    end
+end
+
+-- Agora o corte das últimas 4 linhas funciona perfeitamente!
 -- expect last 4 lines: "end", "    if isAdmin...", "    doLogin()", "while true do"
-for _ = 1, 4 do table.remove(lines) end
+for _ = 1, 4 do 
+    if #lines > 0 then table.remove(lines) end 
+end
 local stripped = table.concat(lines, "\n")
 
 -- ── Build injected code ───────────────────────────────────────────────────────
