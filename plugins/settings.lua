@@ -23,7 +23,13 @@ end
 
 -- Patch: intercept clickMenu header draw to use cloudThemeColor
 local function patchClickMenuColor()
+    -- CORREÇÃO: Se o clickMenu ainda não existir (tempo de boot), sai sem dar erro!
     if not clickMenu then return end
+    
+    -- Evita duplicar o proxy se já foi aplicado antes
+    if _G._patchedClickMenu then return end
+    _G._patchedClickMenu = true
+
     local orig = clickMenu
     _G._origClickMenu = orig
     clickMenu = function(title, items, msg)
@@ -33,11 +39,10 @@ end
 
 -- ── Main Screen ───────────────────────────────────────────────────────────────
 function plugin.run()
-    -- Movemos a chamada do patch para aqui! Agora o clickMenu já existe e não vai crashar.
+    -- Tenta aplicar o patch de cor agora que o utilizador abriu o menu e a sandbox está pronta
     patchClickMenuColor()
 
     if not configAPI then
-        -- try to find it globally or require it
         configAPI = _G.configAPI
     end
 
@@ -70,7 +75,8 @@ plugin.run = function()
             default  = colors.blue,
             onChange = function(v)
                 _G.cloudThemeColor = v
-                patchClickMenuColor()
+                -- Só chama o patch se o ambiente já estiver pronto
+                if clickMenu then patchClickMenuColor() end
             end,
         })
 
