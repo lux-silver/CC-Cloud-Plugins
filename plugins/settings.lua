@@ -1,52 +1,76 @@
--- Settings Plugin v1
--- Menu plugin: opens settings screen with all registered configs
--- Also registers built-in settings: theme color + log nickname
--- Place at: plugins/settings.lua
+-- Settings Plugin v2
+-- Menu plugin: opens configAPI settings screen
+-- Built-in settings: header color + nickname
 
-local plugin  = {}
-plugin.name   = "settings"
-plugin.label  = "Settings"
-plugin.patch  = false  -- appears as menu entry
+local plugin   = {}
+plugin.name    = "settings"
+plugin.label   = "Settings"
+plugin.patch   = false
+plugin.priority = 10
 
--- ── Built-in: theme color ─────────────────────────────────────────────────────
--- Patches clickMenu to use the chosen header color
+-- ── Theme color patch ─────────────────────────────────────────────────────────
+-- Replaces colors.blue with chosen color in ALL term calls during clickMenu
+local _patched = false
 
-local function applyTheme(c)
-    if not clickMenu then return end
-    local orig = _G._origClickMenu or clickMenu
-    _G._origClickMenu = orig
-    clickMenu = function(title, items, msg)
-        _G.cloudThemeColor = c
-        return orig(title, items, msg)
+local function applyThemeColor(c)
+    -- c is a number (CC color value)
+    -- store it so the patch below uses it
+    _G.cloudThemeColor = c
+
+    if _patched then return end
+    _patched = true
+
+    local origSetBg = term.setBackgroundColor
+    term.setBackgroundColor = function(col)
+        if col == colors.blue and _G.cloudThemeColor then
+            origSetBg(_G.cloudThemeColor)
+        else
+            origSetBg(col)
+        end
     end
 end
 
--- Patch: intercept clickMenu header draw to use cloudThemeColor
-local function patchClickMenuColor()
-    if not clickMenu then return end
-    local orig = clickMenu
-    _G._origClickMenu = orig
-    clickMenu = function(title, items, msg)
-        return orig(title, items, msg)
-    end
+-- ── Register built-ins once configAPI is available ───────────────────────────
+local _registered = false
+local function tryRegister()
+    if _registered or not configAPI then return end
+    _registered = true
+
+    configAPI.register({
+        plugin   = "Cloud Theme",
+        key      = "theme.headerColor",
+        label    = "Header Color",
+        type     = "color",
+        default  = colors.blue,
+        onChange = function(v)
+            -- v comes as number from parseVal — that's correct for colors.*
+            applyThemeColor(v)
+        end,
+    })
+
+    configAPI.register({
+        plugin   = "Cloud Theme",
+        key      = "theme.nickname",
+        label    = "Nickname",
+        type     = "text",
+        default  = "",
+        onChange = function(v)
+            _G.cloudDisplayName = (v and v ~= "") and v or nil
+        end,
+    })
 end
 
--- ── Main Screen ───────────────────────────────────────────────────────────────
+-- ── plugin.run ────────────────────────────────────────────────────────────────
 function plugin.run()
-    -- Movemos a chamada do patch para aqui! Agora o clickMenu já existe e não vai crashar.
-    patchClickMenuColor()
-
-    if not configAPI then
-        -- try to find it globally or require it
-        configAPI = _G.configAPI
-    end
+    tryRegister()
 
     if not configAPI then
         term.setBackgroundColor(colors.black) term.clear()
-        term.setCursorPos(1,2) term.setTextColor(colors.red)
-        term.write("config_api.lua not found!")
+        term.setCursorPos(1,2) term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.red) term.write(" config_api.lua not found!")
         term.setCursorPos(1,4) term.setTextColor(colors.gray)
-        term.write("Add plugins/config_api.lua")
+        term.write(" Add plugins/config_api.lua first.")
+        term.setCursorPos(1,6) term.write(" Press any key...")
         os.pullEvent("key")
         return
     end
@@ -54,39 +78,84 @@ function plugin.run()
     configAPI.settingsScreen()
 end
 
--- ── Self-register built-in settings (runs at load time) ──────────────────────
-local registered = false
-local _origRun = plugin.run
-plugin.run = function()
-    if not registered and configAPI then
-        registered = true
+return plugin-- Settings Plugin v2
+-- Menu plugin: opens configAPI settings screen
+-- Built-in settings: header color + nickname
 
-        -- Theme color
-        configAPI.register({
-            plugin   = "Cloud Theme",
-            key      = "theme.headerColor",
-            label    = "Header Color",
-            type     = "color",
-            default  = colors.blue,
-            onChange = function(v)
-                _G.cloudThemeColor = v
-                patchClickMenuColor()
-            end,
-        })
+local plugin   = {}
+plugin.name    = "settings"
+plugin.label   = "Settings"
+plugin.patch   = false
+plugin.priority = 10
 
-        -- Log nickname
-        configAPI.register({
-            plugin   = "Cloud Theme",
-            key      = "theme.nickname",
-            label    = "Nickname",
-            type     = "text",
-            default  = "",
-            onChange = function(v)
-                _G.cloudDisplayName = (v and v ~= "") and v or nil
-            end,
-        })
+-- ── Theme color patch ─────────────────────────────────────────────────────────
+-- Replaces colors.blue with chosen color in ALL term calls during clickMenu
+local _patched = false
+
+local function applyThemeColor(c)
+    -- c is a number (CC color value)
+    -- store it so the patch below uses it
+    _G.cloudThemeColor = c
+
+    if _patched then return end
+    _patched = true
+
+    local origSetBg = term.setBackgroundColor
+    term.setBackgroundColor = function(col)
+        if col == colors.blue and _G.cloudThemeColor then
+            origSetBg(_G.cloudThemeColor)
+        else
+            origSetBg(col)
+        end
     end
-    _origRun()
+end
+
+-- ── Register built-ins once configAPI is available ───────────────────────────
+local _registered = false
+local function tryRegister()
+    if _registered or not configAPI then return end
+    _registered = true
+
+    configAPI.register({
+        plugin   = "Cloud Theme",
+        key      = "theme.headerColor",
+        label    = "Header Color",
+        type     = "color",
+        default  = colors.blue,
+        onChange = function(v)
+            -- v comes as number from parseVal — that's correct for colors.*
+            applyThemeColor(v)
+        end,
+    })
+
+    configAPI.register({
+        plugin   = "Cloud Theme",
+        key      = "theme.nickname",
+        label    = "Nickname",
+        type     = "text",
+        default  = "",
+        onChange = function(v)
+            _G.cloudDisplayName = (v and v ~= "") and v or nil
+        end,
+    })
+end
+
+-- ── plugin.run ────────────────────────────────────────────────────────────────
+function plugin.run()
+    tryRegister()
+
+    if not configAPI then
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setCursorPos(1,2) term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.red) term.write(" config_api.lua not found!")
+        term.setCursorPos(1,4) term.setTextColor(colors.gray)
+        term.write(" Add plugins/config_api.lua first.")
+        term.setCursorPos(1,6) term.write(" Press any key...")
+        os.pullEvent("key")
+        return
+    end
+
+    configAPI.settingsScreen()
 end
 
 return plugin
