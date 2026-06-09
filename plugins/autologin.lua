@@ -1,47 +1,55 @@
--- Autologin Plugin v2
+-- Autologin Plugin v3
 -- patch plugin: patches doLogin with optional auto-fill
--- Registers settings via configAPI if available
+-- priority 2: runs after config_api (priority 1)
 
-local plugin  = {}
-plugin.name   = "autologin"
-plugin.label  = "autologin"
-plugin.patch  = true
-plugin.priority = 1
+local plugin    = {}
+plugin.name     = "autologin"
+plugin.label    = "autologin"
+plugin.patch    = true
+plugin.priority = 2
 
 function plugin.run()
-    -- register settings if configAPI is available
     if configAPI then
         configAPI.register({
-            plugin  = "Autologin",
-            key     = "autologin.enabled",
-            label   = "Enable Autologin",
-            type    = "checkbox",
-            default = false,
+            plugin   = "Autologin",
+            key      = "autologin.enabled",
+            label    = "Enable Autologin",
+            type     = "checkbox",
+            default  = false,
             onChange = function(v) end,
         })
         configAPI.register({
-            plugin  = "Autologin",
-            key     = "autologin.username",
-            label   = "Username",
-            type    = "text",
-            default = "",
+            plugin   = "Autologin",
+            key      = "autologin.username",
+            label    = "Username",
+            type     = "text",
+            default  = "",
             onChange = function(v) end,
         })
         configAPI.register({
-            plugin  = "Autologin",
-            key     = "autologin.password",
-            label   = "Password",
-            type    = "text",
-            default = "",
+            plugin   = "Autologin",
+            key      = "autologin.password",
+            label    = "Password",
+            type     = "text",
+            default  = "",
             onChange = function(v) end,
         })
     end
 
     local origLogin = doLogin
     doLogin = function()
-        local enabled = configAPI and configAPI.get("autologin.enabled") or false
-        local user    = configAPI and configAPI.get("autologin.username") or ""
-        local pass    = configAPI and configAPI.get("autologin.password") or ""
+        local enabled = false
+        local user    = ""
+        local pass    = ""
+
+        if configAPI then
+            -- get returns actual boolean/string from parseVal
+            local ev = configAPI.get("autologin.enabled")
+            -- handle both boolean true and string "true"
+            enabled = (ev == true or ev == "true")
+            user    = tostring(configAPI.get("autologin.username") or "")
+            pass    = tostring(configAPI.get("autologin.password") or "")
+        end
 
         if enabled and user ~= "" and pass ~= "" then
             local res = rpc({ type="login", username=user, password=pass })
@@ -52,7 +60,6 @@ function plugin.run()
                 return
             end
         end
-        -- fallback to normal login
         origLogin()
     end
 end
