@@ -167,9 +167,9 @@ local _origUserMenu = userMenu
 userMenu = function()
     if #_menuPlugins == 0 then _origUserMenu() return end
     local menuItems = {
-        { label="Withdraw", icon=colors.green },
-        { label="Deposit",  icon=colors.blue  },
-        { label="Log",      icon=colors.gray  },
+        { label="Cloud Storage", icon=colors.cyan   },
+        { label="Bank",          icon=colors.yellow },
+        { label="Market",        icon=colors.orange },
     }
     for _, p in ipairs(_menuPlugins) do
         table.insert(menuItems, { label = p.label or p.name, icon = colors.purple })
@@ -181,20 +181,9 @@ userMenu = function()
         local sel = clickMenu("Cloud - " .. displayName, menuItems)
         if sel == nil or sel == logoutIdx then
             token=nil username=nil isAdmin=false return
-        elseif sel == 1 then
-            itemListUI({ title="Withdraw", actionLabel="Withdrew",
-                fetchFn=function() local r=rpc({type="list_vault",token=token}) return r or {} end,
-                actionFn=function(item,amt)
-                    local r=rpc({type="withdraw",token=token,name=item.name,displayName=item.displayName,count=amt},10)
-                    return r and r.ok, r and r.err end })
-        elseif sel == 2 then
-            itemListUI({ title="Deposit", actionLabel="Deposited",
-                fetchFn=function() local r=rpc({type="list_inventory",token=token}) return r or {} end,
-                actionFn=function(item,amt)
-                    local r=rpc({type="deposit",token=token,name=item.name,displayName=item.displayName,count=amt},10)
-                    return r and r.ok, r and r.err end })
-        elseif sel == 3 then
-            logScreen()
+        elseif sel == 1 then cloudStorageMenu()
+        elseif sel == 2 then bankMenu()
+        elseif sel == 3 then marketMenu()
         else
             local idx = sel - 3
             if _menuPlugins[idx] then _menuPlugins[idx].run() end
