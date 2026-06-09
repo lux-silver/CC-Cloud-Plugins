@@ -6,7 +6,7 @@ local plugin  = {}
 plugin.name   = "autologin"
 plugin.label  = "autologin"
 plugin.patch  = true
-plugin.priority = 0
+plugin.priority = 1
 
 function plugin.run()
     -- register settings if configAPI is available
