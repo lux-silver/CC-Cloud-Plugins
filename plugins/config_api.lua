@@ -63,7 +63,9 @@ local function register(entry)
 end
 
 local function get(key)
-    local e=byKey[key] return e and e.value or nil
+    local e=byKey[key]
+    if not e then return nil end
+    return e.value  -- don't use "e and e.value" — e.value can be false
 end
 local function set(key,value)
     local e=byKey[key] if not e then return end
