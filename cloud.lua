@@ -18,6 +18,7 @@ end
 
 -- ── Load plugin metadata (without executing) ──────────────────────────────────
 -- We read each plugin file, execute it to get the table, then sort by priority
+_G._cloudPluginLoad = true  -- set BEFORE any plugin load to prevent UI execution
 
 local function loadPluginMeta(path)
     local pf = fs.open(path, "r")
@@ -50,6 +51,8 @@ end
 table.sort(allPlugins, function(a,b)
     return (a.meta.priority or 10) < (b.meta.priority or 10)
 end)
+
+_G._cloudPluginLoad = nil  -- clear flag — metadata loading done
 
 -- ── Pre-boot plugins (priority 0) ─────────────────────────────────────────────
 -- These run before the instance is built.
