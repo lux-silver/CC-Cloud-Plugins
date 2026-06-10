@@ -1,5 +1,5 @@
--- Autologin Plugin v9 (RPC Interceptor para Variáveis Locais)
--- priority 2: corre logo após a inicialização da API de configurações
+-- Autologin Plugin v10 (Bypass via Read Interceptor)
+-- priority 2: runs after config_api (priority 1)
 
 local plugin    = {}
 plugin.name     = "autologin"
@@ -8,14 +8,14 @@ plugin.patch    = true
 plugin.priority = 2
 
 function plugin.run()
-    -- 1. Regista os campos no menu de Configurações
+    -- 1. Regista os campos no menu de Configurações normalmente
     if configAPI then
         configAPI.register({
             plugin   = "Autologin",
             key      = "autologin.enabled",
             label    = "Enable Autologin",
             type     = "checkbox",
-            default  = true,
+            default  = false,
             onChange = function(v) end,
         })
         configAPI.register({
@@ -36,50 +36,42 @@ function plugin.run()
         })
     end
 
-    -- 2. Intercepta a função RPC que o doLogin() usa para validar
-    local origRPC = _G.rpc or rpc
-    
-    if type(origRPC) == "function" then
-        local novoRPC = function(origArgs, timeout)
-            -- Se for uma tentativa de login e o autologin estiver ativo, injeta as credenciais
-            if type(origArgs) == "table" and origArgs.type == "login" and configAPI then
-                local enabled = configAPI.get("autologin.enabled")
-                if enabled == true or enabled == "true" then
-                    local user = tostring(configAPI.get("autologin.username") or "")
-                    local pass = tostring(configAPI.get("autologin.password") or "")
-                    
-                    if user ~= "" and pass ~= "" then
-                        origArgs.username = user
-                        origArgs.password = pass
-                    end
-                end
-            end
-            
-            -- Executa a comunicação real com o servidor rednet
-            return origRPC(origArgs, timeout)
-        end
-        
-        -- Substitui globalmente para que a função interna do cloud_user a utilize
-        _G.rpc = novoRPC
-        rpc = novoRPC
+    -- 2. Se o Autologin estiver desativado nas configurações, não faz nada
+    if not configAPI or not configAPI.get("autologin.enabled") then
+        return
     end
 
-    -- 3. IGNORA A TELA (Simula um ENTER automático para disparar o login)
-    if configAPI and configAPI.get("autologin.enabled") then
-        local user = tostring(configAPI.get("autologin.username") or "")
-        local pass = tostring(configAPI.get("autologin.password") or "")
-        if user ~= "" and pass ~= "" then
-            -- Envia eventos virtuais de ENTER para avançar os campos de texto vazios rapidamente
-            local function dispararLogin()
-                sleep(0.2)
-                os.queueEvent("key", keys.enter, false)
-                sleep(0.2)
-                os.queueEvent("key", keys.enter, false)
-            end
-            local co = coroutine.create(dispararLogin)
-            coroutine.resume(co)
+    local user = tostring(configAPI.get("autologin.username") or "")
+    local pass = tostring(configAPI.get("autologin.password") or "")
+    if user == "" or pass == "" then return end
+
+    -- 3. INTERCEPTADOR INTELIGENTE DO READ
+    -- Guardamos a função original do sistema operacional
+    local origRead = _G.read or read
+    local chamadasRead = 0
+
+    local function novoRead(substituteChar)
+        chamadasRead = chamadasRead + 1
+
+        -- A primeira chamada do read() dentro do doLogin() é para o Username
+        if chamadasRead == 1 then
+            return user
         end
+        
+        -- A segunda chamada do read() é para a Password
+        if chamadasRead == 2 then
+            -- Restauramos o read original imediatamente após passar a tela de login
+            _G.read = origRead
+            read = origRead
+            return pass
+        end
+
+        return origRead(substituteChar)
     end
+
+    -- Substitui globalmente a função de leitura para o doLogin() consumi-la
+    _G.read = novoRead
+    read = novoRead
 end
 
 return plugin
