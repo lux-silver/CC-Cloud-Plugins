@@ -1,4 +1,4 @@
--- Autologin Plugin v7 (Bypass via RPC Interceptor)
+-- Autologin Plugin v8 (Injetor de Eventos Virtuais de Teclado)
 -- priority 2: runs after config_api (priority 1)
 
 local plugin    = {}
@@ -36,49 +36,54 @@ function plugin.run()
         })
     end
 
-    -- 2. INTERCEPTOR DA API RPC (Onde o cloud.lua valida os dados)
-    local origRPC = _G.rpc or rpc
-    
-    if type(origRPC) == "function" then
-        local novoRPC = function(origArgs)
-            -- Se o cloud.lua disparar um pedido de login normal, nós trocamos os dados antes de enviar!
-            if type(origArgs) == "table" and origArgs.type == "login" and configAPI then
-                local enabled = configAPI.get("autologin.enabled")
-                if enabled == true or enabled == "true" then
-                    local user = tostring(configAPI.get("autologin.username") or "")
-                    local pass = tostring(configAPI.get("autologin.password") or "")
-                    
-                    if user ~= "" and pass ~= "" then
-                        -- Substitui o que foi digitado na tela pelas tuas credenciais automáticas
-                        origArgs.username = user
-                        origArgs.password = pass
-                    end
-                end
-            end
-            
-            -- Executa a chamada real ao servidor
-            local res = origRPC(origArgs)
-            
-            -- Se for o retorno do login, injeta os tokens no ambiente global para o Cloud aceitar
-            if type(origArgs) == "table" and origArgs.type == "login" and res and res.ok then
-                _G.token    = res.token
-                _G.username = origArgs.username
-                _G.isAdmin  = res.isAdmin or false
-                
-                -- Tenta injetar no ambiente local da thread do Cloud se aplicável
-                local env = getfenv(2)
-                if env then
-                    env.token = res.token
-                    env.username = origArgs.username
-                    env.isAdmin = res.isAdmin or false
-                    env.doLogin = function() return end -- Destrói o loop de login da tela
-                end
-            end
-            return res
-        end
+    -- 2. Se não estiver ativo no Config, não faz nada
+    if not configAPI or not configAPI.get("autologin.enabled") then
+        return
+    end
+
+    local user = tostring(configAPI.get("autologin.username") or "")
+    local pass = tostring(configAPI.get("autologin.password") or "")
+    if user == "" or pass == "" then return end
+
+    -- 3. SOLUÇÃO DE INJEÇÃO EM PARALELO (Ignora totalmente a Sandbox)
+    -- Criamos uma thread nativa no OS que espera a tela abrir e "digita" os teus dados
+    local function simularDigitacaoEEnter()
+        sleep(0.5) -- Aguarda a tela de login desenhar e focar no campo Username
         
-        _G.rpc = novoRPC
-        rpc = novoRPC
+        -- Digita o Usuário
+        for i = 1, #user do
+            os.queueEvent("char", string.sub(user, i, i))
+            sleep(0.05)
+        end
+        sleep(0.2)
+        
+        -- Avança para o campo Password (Envia a tecla TAB ou ENTER dependendo do teu OS)
+        os.queueEvent("key", keys.tab, false)
+        sleep(0.2)
+        
+        -- Digita a Senha
+        for i = 1, #pass do
+            os.queueEvent("char", string.sub(pass, i, i))
+            sleep(0.05)
+        end
+        sleep(0.2)
+        
+        -- Envia o ENTER final para disparar o botão de Login!
+        os.queueEvent("key", keys.enter, false)
+    end
+
+    -- Dispara a simulação em background de forma assíncrona
+    local antigaRotina = os.pullEvent
+    _G.os.pullEvent = function(targetEvent)
+        -- Na primeira vez que o sistema tentar ler um evento do teclado/mouse,
+        -- nós injetamos a nossa sequência fantasma de digitação
+        if not _G.autologin_disparado then
+            _G.autologin_disparado = true
+            -- Inicia a nossa função paralela sem travar a thread principal
+            local co = coroutine.create(simularDigitacaoEEnter)
+            coroutine.resume(co)
+        end
+        return antigaRotina(targetEvent)
     end
 end
 
