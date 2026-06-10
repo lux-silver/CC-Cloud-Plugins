@@ -1,4 +1,4 @@
--- Autologin Plugin v4
+-- Autologin Plugin v4 (CORRIGIDO)
 -- patch plugin: patches doLogin with optional auto-fill
 -- priority 2: runs after config_api (priority 1)
 
@@ -38,28 +38,110 @@ function plugin.run()
     end
 
     -- patch doLogin — reads fresh from configAPI each call
-    local origLogin = doLogin
-    doLogin = function()
-        if configAPI then
-            local enabled = configAPI.get("autologin.enabled")
-            -- parseVal returns actual boolean, but guard against string just in case
-            if enabled == true or enabled == "true" then
-                local user = tostring(configAPI.get("autologin.username") or "")
-                local pass = tostring(configAPI.get("autologin.password") or "")
-                if user ~= "" and pass ~= "" then
-                    local res = rpc({ type="login", username=user, password=pass })
-                    if res and res.ok then
-                        token    = res.token
-                        username = user
-                        isAdmin  = res.isAdmin or false
-                        return
+    if type(doLogin) == "function" then
+        local origLogin = doLogin
+        doLogin = function()
+            if configAPI then
+                local enabled = configAPI.get("autologin.enabled")
+                -- parseVal returns actual boolean, but guard against string just in case
+                if enabled == true or enabled == "true" then
+                    local user = tostring(configAPI.get("autologin.username") or "")
+                    local pass = tostring(configAPI.get("autologin.password") or "")
+                    if user ~= "" and pass ~= "" then
+                        -- Se a função rpc global existir, faz a chamada
+                        if type(rpc) == "function" then
+                            local res = rpc({ type="login", username=user, password=pass })
+                            if res and res.ok then
+                                _G.token    = res.token
+                                _G.username = user
+                                _G.isAdmin  = res.isAdmin or false
+                                return
+                            end
+                        end
+                        -- if login failed, fall through to normal login
                     end
-                    -- if login failed, fall through to normal login
                 end
             end
+            origLogin()
         end
-        origLogin()
     end
 end
+
+-- === O PULO DO GATO ===
+-- Força a execução do plugin imediatamente caso o teu sistema de inicialização de terceiros não o chame!
+plugin.run()
+
+return plugin-- Autologin Plugin v4 (CORRIGIDO)
+-- patch plugin: patches doLogin with optional auto-fill
+-- priority 2: runs after config_api (priority 1)
+
+local plugin    = {}
+plugin.name     = "autologin"
+plugin.label    = "autologin"
+plugin.patch    = true
+plugin.priority = 2
+
+function plugin.run()
+    -- register settings first so values are loaded from disk before we patch doLogin
+    if configAPI then
+        configAPI.register({
+            plugin   = "Autologin",
+            key      = "autologin.enabled",
+            label    = "Enable Autologin",
+            type     = "checkbox",
+            default  = false,
+            onChange = function(v) end,
+        })
+        configAPI.register({
+            plugin   = "Autologin",
+            key      = "autologin.username",
+            label    = "Username",
+            type     = "text",
+            default  = "",
+            onChange = function(v) end,
+        })
+        configAPI.register({
+            plugin   = "Autologin",
+            key      = "autologin.password",
+            label    = "Password",
+            type     = "text",
+            default  = "",
+            onChange = function(v) end,
+        })
+    end
+
+    -- patch doLogin — reads fresh from configAPI each call
+    if type(doLogin) == "function" then
+        local origLogin = doLogin
+        doLogin = function()
+            if configAPI then
+                local enabled = configAPI.get("autologin.enabled")
+                -- parseVal returns actual boolean, but guard against string just in case
+                if enabled == true or enabled == "true" then
+                    local user = tostring(configAPI.get("autologin.username") or "")
+                    local pass = tostring(configAPI.get("autologin.password") or "")
+                    if user ~= "" and pass ~= "" then
+                        -- Se a função rpc global existir, faz a chamada
+                        if type(rpc) == "function" then
+                            local res = rpc({ type="login", username=user, password=pass })
+                            if res and res.ok then
+                                _G.token    = res.token
+                                _G.username = user
+                                _G.isAdmin  = res.isAdmin or false
+                                return
+                            end
+                        end
+                        -- if login failed, fall through to normal login
+                    end
+                end
+            end
+            origLogin()
+        end
+    end
+end
+
+-- === O PULO DO GATO ===
+-- Força a execução do plugin imediatamente caso o teu sistema de inicialização de terceiros não o chame!
+plugin.run()
 
 return plugin
