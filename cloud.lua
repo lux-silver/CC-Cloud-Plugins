@@ -129,13 +129,13 @@ local inject = {}
 table.insert(inject, "\n-- === Cloud Launcher v4 injection ===")
 table.insert(inject, "local _plugins = {}")
 
--- inline all non-priority-0 plugins (priority 1+ go into instance)
+-- inline all non-priority-0 plugins using dofile (saves memory vs inline)
 for _, entry in ipairs(allPlugins) do
     if (entry.meta.priority or 10) > 0 then
         table.insert(inject, "do")
-        table.insert(inject, "  local _p = (function()")
-        table.insert(inject, entry.src)
-        table.insert(inject, "  end)()")
+        table.insert(inject, "  _G._cloudPluginLoad = true")
+        table.insert(inject, "  local _p = dofile(" .. string.format("%q", entry.path) .. ")")
+        table.insert(inject, "  _G._cloudPluginLoad = nil")
         table.insert(inject, "  if type(_p)=='table' and _p.run and _p.name then")
         table.insert(inject, "    _p._priority = " .. tostring(entry.meta.priority or 10))
         table.insert(inject, "    table.insert(_plugins, _p)")
