@@ -1,5 +1,5 @@
 -- Theme Plugin v1
--- patch plugin: applies header color and nickname from config
+-- patch plugin: applies header color and nickname
 -- priority 3: runs after config_api (1) and autologin (2)
 
 local plugin    = {}
@@ -11,19 +11,6 @@ plugin.priority = 3
 function plugin.run()
     if not configAPI then return end
 
-    -- patch term.setBackgroundColor once so colors.blue → theme color everywhere
-    local _origSetBg = term.setBackgroundColor
-    local function applyPatch()
-        local c = configAPI.get("theme.headerColor")
-        if not c or c == colors.blue then
-            term.setBackgroundColor = _origSetBg
-            return
-        end
-        term.setBackgroundColor = function(col)
-            _origSetBg(col == colors.blue and c or col)
-        end
-    end
-
     configAPI.register({
         plugin   = "Theme",
         key      = "theme.headerColor",
@@ -31,8 +18,8 @@ function plugin.run()
         type     = "color",
         default  = colors.blue,
         onChange = function(v)
-            _G.cloudThemeColor = v
-            applyPatch()
+            -- store as global — config_api and cloud.lua read _G.cloudThemeColor
+            _G.cloudThemeColor = (v ~= colors.blue) and v or nil
         end,
     })
 
@@ -46,8 +33,6 @@ function plugin.run()
             _G.cloudDisplayName = (v and v ~= "") and v or nil
         end,
     })
-
-    applyPatch()
 end
 
 return plugin
