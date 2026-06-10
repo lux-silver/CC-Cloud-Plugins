@@ -225,14 +225,21 @@ table.insert(inject, "    if isAdmin then adminMenu() else userMenu() end")
 table.insert(inject, "end")
 
 -- ── Write and run instance ────────────────────────────────────────────────────
--- Remove o loop principal antigo de forma inteligente, sem apagar funções novas
-while #lines > 0 do
-    local lastLine = lines[#lines]:gsub("%s+$","")
-    if lastLine == "end" or lastLine == "if isAdmin then adminMenu() else userMenu() end" or lastLine == "doLogin()" or lastLine == "while true do" or lastLine == "" then
-        table.remove(lines)
+-- Remove o loop principal de login de forma cirúrgica (as 4 linhas do fim)
+local foundLoop = 0
+local i = #lines
+while i > 0 and foundLoop < 4 do
+    local txt = lines[i]:gsub("%s+$","")
+    if txt == "end" or txt == "if isAdmin then adminMenu() else userMenu() end" or txt == "doLogin()" or txt == "while true do" then
+        table.remove(lines, i)
+        foundLoop = foundLoop + 1
+    elseif txt == "" then
+        table.remove(lines, i)
     else
+        -- Se achou outra coisa (como o fim da função coinflip), ignora e para o corte do loop
         break
     end
+    i = i - 1
 end
 
 dofile(INSTANCE)
