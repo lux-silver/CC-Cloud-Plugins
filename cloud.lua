@@ -225,10 +225,14 @@ table.insert(inject, "    if isAdmin then adminMenu() else userMenu() end")
 table.insert(inject, "end")
 
 -- ── Write and run instance ────────────────────────────────────────────────────
-local out = fs.open(INSTANCE, "w")
-out.write(stripped)
-out.write("\n")
-out.write(table.concat(inject, "\n"))
-out.close()
+-- Remove o loop principal antigo de forma inteligente, sem apagar funções novas
+while #lines > 0 do
+    local lastLine = lines[#lines]:gsub("%s+$","")
+    if lastLine == "end" or lastLine == "if isAdmin then adminMenu() else userMenu() end" or lastLine == "doLogin()" or lastLine == "while true do" or lastLine == "" then
+        table.remove(lines)
+    else
+        break
+    end
+end
 
 dofile(INSTANCE)
