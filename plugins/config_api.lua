@@ -94,6 +94,12 @@ local function colorName(c)
     return "?"
 end
 
+-- ── Theme color helper ────────────────────────────────────────────────────────
+-- Uses cloudThemeColor if set by theme.lua, otherwise falls back to colors.blue
+local function themeColor()
+    return _G.cloudThemeColor or colors.blue
+end
+
 -- ── Widgets (all values forced to string where needed) ───────────────────────
 local function drawSlider(x,y,w,value,minV,maxV,step,col)
     local trackW=math.max(2,w-8)
@@ -103,7 +109,7 @@ local function drawSlider(x,y,w,value,minV,maxV,step,col)
     term.setCursorPos(x,y)
     term.setBackgroundColor(colors.black) term.setTextColor(colors.white) term.write("[")
     term.setTextColor(colors.lightGray) term.write("<")
-    term.setBackgroundColor(col or colors.blue) term.setTextColor(col or colors.blue)
+    term.setBackgroundColor(col or themeColor()) term.setTextColor(col or themeColor())
     term.write(string.rep(" ",filled))
     term.setBackgroundColor(colors.gray) term.setTextColor(colors.gray)
     term.write(string.rep(" ",trackW-filled))
@@ -170,7 +176,7 @@ local function settingsScreen()
 
     if #plugNames==0 then
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(themeColor()) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine() term.write(" Settings")
         term.setCursorPos(1,3) term.setBackgroundColor(colors.black)
         term.setTextColor(colors.gray) term.write("No settings registered.")
@@ -184,7 +190,7 @@ local function settingsScreen()
     local function drawPluginList()
         W,H=term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(themeColor()) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         term.write(" Settings")
         term.setCursorPos(W-2,1) term.write("[X]")
@@ -216,7 +222,7 @@ local function settingsScreen()
             W,H=term.getSize()
             term.setBackgroundColor(colors.black) term.clear()
             -- header
-            term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+            term.setBackgroundColor(themeColor()) term.setTextColor(colors.white)
             term.setCursorPos(1,1) term.clearLine()
             term.write(" "..pname)
             term.setCursorPos(W-2,1) term.write("[X]")
