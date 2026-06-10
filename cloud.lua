@@ -166,30 +166,131 @@ end
 -- run patch plugins in priority order
 for _, p in ipairs(_patchPlugins) do p.run() end
 
+-- Wrap userMenu to inject plugin entries without hardcoding the original menu
 local _origUserMenu = userMenu
 userMenu = function()
     if #_menuPlugins == 0 then _origUserMenu() return end
-    local menuItems = {
-        { label="Cloud Storage", icon=colors.cyan   },
-        { label="Bank",          icon=colors.yellow },
-        { label="Market",        icon=colors.orange },
-    }
-    for _, p in ipairs(_menuPlugins) do
-        table.insert(menuItems, { label = p.label or p.name, icon = colors.purple })
+
+    -- Intercept the opts table from the original userMenu by monkey-patching
+    -- the inner loop. We capture opts by running a fake iteration.
+    -- Strategy: run original userMenu but override os.pullEvent to capture
+    -- the opts list on first draw, then restore and rebuild with plugins.
+
+    -- Simpler approach: shadow the original opts by re-reading the source.
+    -- We detect opts by calling _origUserMenu in a sandboxed env where
+    -- term writes are captured. Too complex.
+
+    -- Best approach for CraftOS Lua 5.1:
+    -- We know userMenu draws a list and waits for keys.
+    -- We patch term.write to capture menu items on first clear, then abort.
+
+    local capturedOpts = {}
+    local capturing = true
+    local origWrite = term.write
+    local origClear = term.clearLine
+    local origSetCursor = term.setCursorPos
+    local origSetBg = term.setBackgroundColor
+    local origSetFg = term.setTextColor
+    local lastRow = 0
+
+    -- Capture phase: intercept term to read menu items
+    term.setCursorPos = function(x, y) lastRow = y origSetCursor(x, y) end
+    term.write = function(s)
+        -- menu items are written at col 3+ with a leading space
+        if capturing and lastRow >= 3 then
+            local trimmed = s:match("^ (.+)$")
+            if trimmed and trimmed ~= "" then
+                table.insert(capturedOpts, trimmed)
+            end
+        end
+        origWrite(s)
     end
-    table.insert(menuItems, { label="Logout", icon=colors.red })
-    local logoutIdx = #menuItems
+
+    -- Run one fake event cycle to capture the draw
+    local origPull = os.pullEvent
+    local pulled = false
+    os.pullEvent = function(filter)
+        if not pulled then
+            pulled = true
+            capturing = false
+            -- restore term
+            term.write = origWrite
+            term.setCursorPos = origSetCursor
+            -- abort original loop by erroring (caught below)
+            error("__capture_done__")
+        end
+        return origPull(filter)
+    end
+
+    pcall(_origUserMenu)
+
+    -- Restore everything
+    term.write = origWrite
+    term.clearLine = origClear
+    term.setCursorPos = origSetCursor
+    term.setBackgroundColor = origSetBg
+    term.setTextColor = origSetFg
+    os.pullEvent = origPull
+
+    -- capturedOpts now has the original menu items (last one is "Logout")
+    -- Remove "Logout" from end, we'll re-add it after plugin entries
+    local baseOpts = {}
+    for _, o in ipairs(capturedOpts) do
+        if o:lower() ~= "logout" then table.insert(baseOpts, o) end
+    end
+
+    -- Build final opts: base + plugins + Logout
+    local opts = {}
+    for _, o in ipairs(baseOpts) do table.insert(opts, o) end
+    for _, p in ipairs(_menuPlugins) do table.insert(opts, p.label or p.name) end
+    table.insert(opts, "Logout")
+
+    local sel = 1
     while true do
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setCursorPos(1,1) term.clearLine()
         local displayName = _G.cloudDisplayName or username
-        local sel = clickMenu("Cloud - " .. displayName, menuItems)
-        if sel == nil or sel == logoutIdx then
-            token=nil username=nil isAdmin=false return
-        elseif sel == 1 then cloudStorageMenu()
-        elseif sel == 2 then bankMenu()
-        elseif sel == 3 then marketMenu()
-        else
-            local idx = sel - 3
-            if _menuPlugins[idx] then _menuPlugins[idx].run() end
+        term.write(" Cloud - " .. displayName)
+        for i, opt in ipairs(opts) do
+            term.setCursorPos(3, i+2)
+            if i == sel then term.setBackgroundColor(colors.gray) term.setTextColor(colors.yellow)
+            else term.setBackgroundColor(colors.black) term.setTextColor(colors.white) end
+            term.clearLine() term.write(" " .. opt)
+        end
+        term.setBackgroundColor(colors.black)
+        local ev, p1 = os.pullEvent("key")
+        if p1 == keys.up and sel > 1 then sel=sel-1
+        elseif p1 == keys.down and sel < #opts then sel=sel+1
+        elseif p1 == keys.enter then
+            local logoutIdx = #opts
+            if sel == logoutIdx then
+                token=nil username=nil isAdmin=false return
+            elseif sel <= #baseOpts then
+                -- call original userMenu but intercept to only run the selected option
+                -- We fake the key sequence: navigate to sel, press enter
+                local presses = {}
+                -- reset to top first (sel-1 downs)
+                for _ = 1, sel-1 do table.insert(presses, keys.down) end
+                table.insert(presses, keys.enter)
+                table.insert(presses, keys.q)  -- exit after action
+                local origPull2 = os.pullEvent
+                local pi = 0
+                os.pullEvent = function(filter)
+                    pi = pi + 1
+                    if pi <= #presses then
+                        return "key", presses[pi]
+                    end
+                    os.pullEvent = origPull2
+                    return origPull2(filter)
+                end
+                _origUserMenu()
+                os.pullEvent = origPull2
+            else
+                -- plugin
+                local idx = sel - #baseOpts
+                if _menuPlugins[idx] then _menuPlugins[idx].run() end
+            end
         end
     end
 end
