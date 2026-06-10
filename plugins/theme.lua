@@ -25,12 +25,11 @@ local COLOR_HEX = {
     [colors.brown]     = 0x7F664C,
 }
 
-local DEFAULT_ORANGE_HEX = 0xCC6600
+local DEFAULT_HEX = 0x3366CC  -- colors.blue default
 
 local function applyColor(c)
-    local hex = COLOR_HEX[c] or DEFAULT_ORANGE_HEX
-    -- redefine colors.orange palette to match chosen color
-    pcall(term.setPaletteColor, colors.orange, hex)
+    local hex = COLOR_HEX[c] or DEFAULT_HEX
+    pcall(term.setPaletteColor, colors.blue, hex)
 end
 
 function plugin.run()
@@ -41,7 +40,7 @@ function plugin.run()
         key      = "theme.headerColor",
         label    = "Header Color",
         type     = "color",
-        default  = colors.orange,
+        default  = colors.blue,
         onChange = function(v)
             _G.cloudThemeColor = v
             applyColor(v)
