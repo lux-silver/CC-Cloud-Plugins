@@ -169,27 +169,53 @@ for _, p in ipairs(_patchPlugins) do p.run() end
 local _origUserMenu = userMenu
 userMenu = function()
     if #_menuPlugins == 0 then _origUserMenu() return end
-    local menuItems = {
-        { label="Cloud Storage", icon=colors.cyan   },
-        { label="Bank",          icon=colors.yellow },
-        { label="Market",        icon=colors.orange },
-    }
+    local opts = {"Withdraw","Deposit","Log"}
     for _, p in ipairs(_menuPlugins) do
-        table.insert(menuItems, { label = p.label or p.name, icon = colors.purple })
+        table.insert(opts, p.label or p.name)
     end
-    table.insert(menuItems, { label="Logout", icon=colors.red })
-    local logoutIdx = #menuItems
+    table.insert(opts, "Logout")
+    local sel = 1
     while true do
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setCursorPos(1,1) term.clearLine()
         local displayName = _G.cloudDisplayName or username
-        local sel = clickMenu("Cloud - " .. displayName, menuItems)
-        if sel == nil or sel == logoutIdx then
-            token=nil username=nil isAdmin=false return
-        elseif sel == 1 then cloudStorageMenu()
-        elseif sel == 2 then bankMenu()
-        elseif sel == 3 then marketMenu()
-        else
-            local idx = sel - 3
-            if _menuPlugins[idx] then _menuPlugins[idx].run() end
+        term.write(" Cloud - "..displayName)
+        for i, opt in ipairs(opts) do
+            term.setCursorPos(3, i+2)
+            if i == sel then term.setBackgroundColor(colors.gray) term.setTextColor(colors.yellow)
+            else term.setBackgroundColor(colors.black) term.setTextColor(colors.white) end
+            term.clearLine() term.write(" "..opt)
+        end
+        term.setBackgroundColor(colors.black)
+        local ev, p1 = os.pullEvent("key")
+        if p1 == keys.up and sel > 1 then sel=sel-1
+        elseif p1 == keys.down and sel < #opts then sel=sel+1
+        elseif p1 == keys.enter then
+            if sel == 1 then
+                itemListUI({
+                    title="Withdraw", actionLabel="Withdrew",
+                    fetchFn=function()
+                        local r=rpc({type="list_vault",token=token}) return r or {} end,
+                    actionFn=function(item,amt)
+                        local r=rpc({type="withdraw",token=token,name=item.name,displayName=item.displayName,count=amt},10)
+                        return r and r.ok, r and r.err end })
+            elseif sel == 2 then
+                itemListUI({
+                    title="Deposit", actionLabel="Deposited",
+                    fetchFn=function()
+                        local r=rpc({type="list_inventory",token=token}) return r or {} end,
+                    actionFn=function(item,amt)
+                        local r=rpc({type="deposit",token=token,name=item.name,displayName=item.displayName,count=amt},10)
+                        return r and r.ok, r and r.err end })
+            elseif sel == 3 then
+                logScreen()
+            elseif sel == #opts then
+                token=nil username=nil isAdmin=false return
+            else
+                local idx = sel - 3
+                if _menuPlugins[idx] then _menuPlugins[idx].run() end
+            end
         end
     end
 end
