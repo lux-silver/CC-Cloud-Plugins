@@ -15,7 +15,7 @@ function plugin.run()
             key      = "autologin.enabled",
             label    = "Enable Autologin",
             type     = "checkbox",
-            default  = false,
+            default  = true,
             onChange = function(v) end,
         })
         configAPI.register({
