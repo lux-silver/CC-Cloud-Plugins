@@ -1,5 +1,6 @@
--- Theme Plugin v1
--- patch plugin: applies header color and nickname globally
+-- Theme Plugin v2
+-- patch plugin: changes the header color palette and nickname
+-- Uses term.setPaletteColor to redefine colors.orange globally
 -- priority 3: runs after config_api (1) and autologin (2)
 
 local plugin    = {}
@@ -8,45 +9,42 @@ plugin.label    = "theme"
 plugin.patch    = true
 plugin.priority = 3
 
+-- Palette hex values matching CC color constants
+local COLOR_HEX = {
+    [colors.blue]      = 0x3366CC,
+    [colors.red]       = 0xCC4444,
+    [colors.green]     = 0x57A64E,
+    [colors.purple]    = 0xB357BD,
+    [colors.cyan]      = 0x4AC8AC,
+    [colors.orange]    = 0xCC6600,
+    [colors.magenta]   = 0xE57FD8,
+    [colors.gray]      = 0x4C4C4C,
+    [colors.lightBlue] = 0x7099D4,
+    [colors.yellow]    = 0xDEDE6C,
+    [colors.lime]      = 0x7FCC19,
+    [colors.brown]     = 0x7F664C,
+}
+
+local DEFAULT_ORANGE_HEX = 0xCC6600
+
+local function applyColor(c)
+    local hex = COLOR_HEX[c] or DEFAULT_ORANGE_HEX
+    -- redefine colors.orange palette to match chosen color
+    pcall(term.setPaletteColor, colors.orange, hex)
+end
+
 function plugin.run()
     if not configAPI then return end
-
-    -- patch term.setBackgroundColor ONCE so every colors.blue call
-    -- anywhere (cloud_user, plugins, settings) uses the theme color
-    local _origSetBg = term.setBackgroundColor
-    local _patched   = false
-
-    local function applyPatch(c)
-        if c == colors.blue then
-            -- no patch needed, restore original
-            if _patched then
-                term.setBackgroundColor = _origSetBg
-                _patched = false
-            end
-            return
-        end
-        if not _patched then
-            term.setBackgroundColor = function(col)
-                _origSetBg(col == colors.blue and c or col)
-            end
-            _patched = true
-        else
-            -- update the closure color by re-patching
-            term.setBackgroundColor = function(col)
-                _origSetBg(col == colors.blue and c or col)
-            end
-        end
-    end
 
     configAPI.register({
         plugin   = "Theme",
         key      = "theme.headerColor",
         label    = "Header Color",
         type     = "color",
-        default  = colors.blue,
+        default  = colors.orange,
         onChange = function(v)
             _G.cloudThemeColor = v
-            applyPatch(v)
+            applyColor(v)
         end,
     })
 
