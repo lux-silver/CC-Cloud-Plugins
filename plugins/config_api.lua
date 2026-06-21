@@ -362,10 +362,22 @@ local function settingsScreen()
     while true do
         drawPluginList()
         local ev,p1,p2,p3=os.pullEvent()
-        if ev=="key" and (p1==keys.q or p1==keys.escape) then return end
+        
+        if ev=="key" and (p1==keys.q or p1==keys.escape) then 
+            -- Consome o evento e os resíduos rápidos para não vazar pro menu.lua
+            local tm = os.startTimer(0.1)
+            repeat local e, id = os.pullEvent() until e == "timer" and id == tm
+            return 
+        end
+        
         if ev=="mouse_click" then
             local mx,my=p2,p3
-            if my==1 and mx>=W-2 then return end
+            if my==1 and mx>=W-2 then 
+                -- Consome o clique e os eventos mouse_up residuais antes de voltar
+                local tm = os.startTimer(0.1)
+                repeat local e, id = os.pullEvent() until e == "timer" and id == tm
+                return 
+            end
             local idx=my-2
             if idx>=1 and idx<=#plugNames then
                 pluginPage(plugNames[idx])

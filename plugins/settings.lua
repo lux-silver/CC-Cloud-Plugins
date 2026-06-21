@@ -23,3 +23,5 @@ function plugin.run()
 end
 
 return plugin
+
+-- @installed:1781121142

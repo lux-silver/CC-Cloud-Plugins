@@ -1,4 +1,4 @@
--- Autologin Plugin v10 (Bypass via Read Interceptor)
+-- Autologin Plugin v15 (Auto-Destruição Pós-Uso)
 -- priority 2: runs after config_api (priority 1)
 
 local plugin    = {}
@@ -45,31 +45,34 @@ function plugin.run()
     local pass = tostring(configAPI.get("autologin.password") or "")
     if user == "" or pass == "" then return end
 
-    -- 3. INTERCEPTADOR INTELIGENTE DO READ
-    -- Guardamos a função original do sistema operacional
+    -- 3. INTERCEPTADOR COM AUTO-DESTRUIÇÃO MÁXIMA
     local origRead = _G.read or read
     local chamadasRead = 0
 
     local function novoRead(substituteChar)
         chamadasRead = chamadasRead + 1
 
-        -- A primeira chamada do read() dentro do doLogin() é para o Username
+        -- 1ª Chamada: Injeta o Username
         if chamadasRead == 1 then
             return user
         end
         
-        -- A segunda chamada do read() é para a Password
+        -- 2ª Chamada: Injeta a Password
         if chamadasRead == 2 then
-            -- Restauramos o read original imediatamente após passar a tela de login
+            -- RESTAURAÇÃO TOTAL E DEFINITIVA ANTES DE RETORNAR
             _G.read = origRead
             read = origRead
+            novoRead = nil -- Auto-destrói a referência na memória
             return pass
         end
 
+        -- Segurança extra: se escapar qualquer chamada, desliga imediatamente
+        _G.read = origRead
+        read = origRead
         return origRead(substituteChar)
     end
 
-    -- Substitui globalmente a função de leitura para o doLogin() consumi-la
+    -- Substitui globalmente a função de leitura apenas para o instante do login
     _G.read = novoRead
     read = novoRead
 end
