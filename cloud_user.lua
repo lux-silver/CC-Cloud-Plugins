@@ -1,6 +1,6 @@
--- Cloud User v7
+-- Cloud User v6
 local PROTOCOL = "cloud_ui"
-local API_URL  = "https://corbin-nonclimactical-rambunctiously.ngrok-free.dev"
+local API_URL  = "https://approaches-volleyball-isa-lamp.trycloudflare.com"
 
 local modemSide = nil
 for _, s in ipairs({"top","bottom","left","right","front","back"}) do
@@ -26,7 +26,6 @@ local username     = nil
 local isAdmin      = false
 local unreadNotifs = 0
 local needsRelogin = false
-local shiftHeld    = false   -- global para evitar "attempt to assign to undeclared" em handlers
 
 local foodSubCache   = nil
 local foodSubCacheTs = 0
@@ -76,22 +75,39 @@ local HTTP_OPS = {
     slots_spin=true, mines_start=true, mines_reveal=true, mines_cashout=true,
     get_leaderboard=true,
     admin_list_users=true, admin_create_user=true, admin_delete_user=true,
-    admin_bank_overview=true,   -- vai direto ao server (bridge não tem essa rota)
     subscription_status=true, subscription_create=true, subscription_cancel=true,
     subscription_food_items=true,
 }
+
+-- ── HTTP com retry e timeout explícito ───────────────────────────────────────
+-- Tenta até MAX_RETRIES vezes com intervalo crescente antes de desistir.
+-- Retorna nil SOMENTE se todas as tentativas falharam (túnel caído de verdade).
+local HTTP_TIMEOUT  = 8   -- segundos por tentativa
+local MAX_RETRIES   = 3   -- quantas vezes tenta antes de devolver nil
+local RETRY_DELAY   = 1.5 -- segundos entre tentativas
+
+local function httpPost(path, bodyTable, headers)
+    local bodyJson = textutils.serialiseJSON(bodyTable)
+    local hdrs = headers or { ["Content-Type"] = "application/json" }
+    for attempt = 1, MAX_RETRIES do
+        local ok, resp = pcall(http.post, API_URL..path, bodyJson, hdrs)
+        if ok and resp then
+            local raw = resp.readAll(); resp.close()
+            local data = textutils.unserialiseJSON(raw)
+            return data  -- sucesso — pode ser nil se JSON inválido, mas não é erro de rede
+        end
+        -- Falha de rede: espera um pouco e tenta de novo (exceto na última tentativa)
+        if attempt < MAX_RETRIES then sleep(RETRY_DELAY) end
+    end
+    return nil  -- todas as tentativas falharam
+end
 
 local function httpRpc(msg)
     local body = {}
     for k, v in pairs(msg) do
         if k ~= "type" and k ~= "_seq" then body[k] = v end
     end
-    local ok, resp = pcall(http.post, API_URL.."/"..msg.type,
-        textutils.serialiseJSON(body),
-        { ["Content-Type"] = "application/json" })
-    if not ok or not resp then return nil end
-    local data = textutils.unserialiseJSON(resp.readAll())
-    resp.close()
+    local data = httpPost("/"..msg.type, body)
     if data and data.err == "Session expired" then needsRelogin = true end
     return data
 end
@@ -101,7 +117,7 @@ local function rpc(msg, timeout)
     return bridgeRpc(msg, timeout)
 end
 
--- ── Persistência de sessão (evita precisar logar de novo ao reiniciar o tablet) ─
+-- ── Persistência de sessão ────────────────────────────────────────────────────
 local SESSION_FILE = "/.cloud_session"
 
 local function saveSession(tok, uname, admin)
@@ -116,6 +132,10 @@ local function clearSession()
     if fs.exists(SESSION_FILE) then fs.delete(SESSION_FILE) end
 end
 
+-- Tenta restaurar a sessão salva em disco.
+-- IMPORTANTE: se o servidor não responder (túnel caído), NÃO limpa a sessão —
+-- assume que o token ainda é válido e deixa o usuário entrar offline.
+-- Só limpa a sessão se o servidor responder explicitamente com ok=false.
 local function tryRestoreSession()
     if not fs.exists(SESSION_FILE) then return false end
     local f = fs.open(SESSION_FILE, "r")
@@ -123,18 +143,27 @@ local function tryRestoreSession()
     local raw = f.readAll(); f.close()
     local data = textutils.unserialiseJSON(raw)
     if not data or not data.token then return false end
-    -- Verifica se o token ainda é válido no servidor
-    local ok2, resp = pcall(http.post, API_URL.."/session_check",
-        textutils.serialiseJSON({token=data.token}),
-        {["Content-Type"]="application/json"})
-    if not ok2 or not resp then return false end
-    local res = textutils.unserialiseJSON(resp.readAll()); resp.close()
-    if res and res.ok then
-        token = data.token
+
+    -- Tenta validar o token no servidor
+    local res = httpPost("/session_check", {token=data.token})
+
+    if res == nil then
+        -- Servidor não respondeu (túnel caído, rede instável) —
+        -- restaura a sessão localmente sem validar para não perder acesso
+        token    = data.token
         username = data.username
-        isAdmin = data.isAdmin or false
+        isAdmin  = data.isAdmin or false
+        return true   -- entra "otimisticamente" — se o token expirou, needsRelogin vai pegar depois
+    end
+
+    if res.ok then
+        token    = data.token
+        username = data.username or res.username
+        isAdmin  = data.isAdmin or res.isAdmin or false
         return true
     end
+
+    -- Servidor respondeu e disse que o token é inválido — aí sim limpa
     clearSession()
     return false
 end
@@ -150,7 +179,10 @@ local function doLogin()
         local uname = read()
         term.setCursorPos(1,4) term.write("Password: ")
         local pass = read("*")
+        -- Mostra "Conectando..." enquanto tenta
+        term.setCursorPos(1,6) term.setTextColor(colors.gray) term.write("Connecting...")
         local res = rpc({ type="login", username=uname, password=pass })
+        term.setCursorPos(1,6) term.setBackgroundColor(colors.black) term.write(string.rep(" ", W))
         if res and res.ok then
             token=res.token username=uname isAdmin=res.isAdmin or false
             unreadNotifs = res.unread_notifs or 0
@@ -160,8 +192,12 @@ local function doLogin()
             return
         else
             term.setCursorPos(1,6) term.setTextColor(colors.red)
-            term.write((res and res.err) or "Server not found")
-            term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key...")
+            if res == nil then
+                term.write("Server unreachable (tunnel down?)")
+            else
+                term.write(res.err or "Login failed")
+            end
+            term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key to retry...")
             os.pullEvent()
         end
     end
@@ -2199,7 +2235,7 @@ local function minesGame()
                         if r.is_bomb then
                             grid[tile]="bomb"
                             for _,bp in ipairs(r.bombs) do if grid[bp]=="hidden" then grid[bp]="bomb" end end
-                            result_msg="BOOM! Lost "..wager.."sp"
+                            result_msg="BOOM! Lost "..r.wager.."sp"
                             result_col=colors.red state="over"
                             local bi2=rpc({type="bank_info",token=token},5)
                             bal=(bi2 and bi2.balance) or bal
@@ -2894,7 +2930,13 @@ local function userMenu()
     while true do
         if needsRelogin then needsRelogin = false doLogin() end
         local ncRes = rpc({type="get_notif_count", token=token}, 5)
-        local unreadCount = (ncRes and ncRes.count) or unreadNotifs
+        -- Se não conseguiu pegar notificações por erro de rede, mostra aviso mas não desloga
+        local unreadCount
+        if ncRes == nil then
+            unreadCount = unreadNotifs  -- mantém o último valor conhecido
+        else
+            unreadCount = ncRes.count or unreadNotifs
+        end
         local hasUnread = unreadCount > 0
         local notifLabel = hasUnread and ("Notifications ("..unreadCount..")") or "Notifications"
         local hasFoodSub = foodSubCache and foodSubCache.food_sub
@@ -2909,9 +2951,7 @@ local function userMenu()
             {label="Logout",        icon=colors.red   },
         }
         local sel=clickMenu("Cloud - "..username, menuItems, nil, 15)
-        if sel=="__refresh__" then
-            -- só atualiza o contador de notificações, não faz nada mais
-        elseif sel==nil or sel==8 then token=nil username=nil isAdmin=false foodSubCache=nil return
+        if sel==nil or sel==8 then token=nil username=nil isAdmin=false foodSubCache=nil return
         elseif sel==1 then cloudStorageMenu()
         elseif sel==2 then bankMenu()
         elseif sel==3 then marketMenu()
@@ -3219,10 +3259,31 @@ parallel.waitForAny(
                 doLogin()
             end
             if isAdmin then adminMenu() else userMenu() end
-            -- Se needsRelogin foi setado durante o uso, limpa a sessão salva
+            -- needsRelogin: token rejeitado pelo servidor (não erro de rede)
             if needsRelogin then
-                clearSession()
-                needsRelogin = false
+                -- Tenta uma última vez ver se o servidor está respondendo
+                local chk = httpPost("/session_check", {token=token or ""})
+                if chk == nil then
+                    -- Servidor offline: NÃO limpa sessão, mostra tela de espera
+                    term.setBackgroundColor(colors.black) term.clear()
+                    term.setBackgroundColor(colors.red) term.setTextColor(colors.white)
+                    term.setCursorPos(1,1) term.clearLine() term.write(" Server Offline")
+                    term.setBackgroundColor(colors.black)
+                    term.setCursorPos(2,3) term.setTextColor(colors.yellow)
+                    term.write("Tunnel unreachable.")
+                    term.setCursorPos(2,4) term.setTextColor(colors.gray)
+                    term.write("Sua sessão foi mantida.")
+                    term.setCursorPos(2,5) term.write("Pressione qualquer tecla")
+                    term.setCursorPos(2,6) term.write("para tentar reconectar...")
+                    os.pullEvent()
+                    needsRelogin = false
+                    -- volta ao loop — tryRestoreSession vai restaurar do arquivo
+                else
+                    -- Servidor respondeu: token inválido de verdade, força login
+                    clearSession()
+                    needsRelogin = false
+                    token=nil username=nil isAdmin=false
+                end
             end
         end
     end,
