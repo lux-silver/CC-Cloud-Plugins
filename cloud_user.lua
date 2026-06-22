@@ -839,20 +839,24 @@ local function bankLoans(info)
             -- Row 6: remaining
             term.setCursorPos(2,6) term.setTextColor(colors.orange)
             term.write("Remaining: " .. loan.remaining .. " sp")
-            -- Row 7: rate + daily interest
-            local dailyInt = math.ceil(loan.remaining * (loan.rate / 100))
+            
+            -- ─── ALTERADO ABAIXO: Mudado de /day para /12h ───
+            local periodInt = math.ceil(loan.remaining * (loan.rate / 100))
             term.setCursorPos(2,7) term.setTextColor(colors.gray)
-            term.write(("Rate: "..loan.rate.."%/day  (+"..dailyInt.." sp/day)"):sub(1,W-2))
+            term.write(("Rate: "..loan.rate.."%/12h  (+"..periodInt.." sp/12h)"):sub(1,W-2))
+            
             -- Row 8: total owed at due date
             local daysLeft = math.max(0, loan.daysLeft)
             if not loan.overdue and daysLeft > 0 then
                 local est = loan.remaining
-                for _=1,daysLeft do est=math.ceil(est*(1+loan.rate/100)) end
+                -- ─── ALTERADO ABAIXO: Roda 2 vezes por dia restante (a cada 12h) ───
+                for _=1,(daysLeft * 2) do est=math.ceil(est*(1+loan.rate/100)) end
                 term.setCursorPos(2,8) term.setTextColor(colors.red)
                 term.write(("At due date: ~"..est.." sp owed"):sub(1,W-2))
             elseif loan.overdue then
                 term.setCursorPos(2,8) term.setTextColor(colors.red)
-                term.write(("Pay now! Interest growing daily"):sub(1,W-2))
+                -- ─── ALTERADO ABAIXO: Texto de aviso de atraso ───
+                term.write(("Pay now! Interest growing every 12h"):sub(1,W-2))
             end
             -- Buttons: rows btnStart+1, btnStart+2, btnStart+3
             local btnStart = 9
@@ -908,19 +912,25 @@ local function bankLoans(info)
             if info.loanRate then
                 -- Row 4: rate
                 term.setCursorPos(2,4) term.setTextColor(colors.gray)
-                term.write(("Rate: "..info.loanRate.."%/day  |  Max: 64 sp"):sub(1,W-2))
+                -- ─── ALTERADO ABAIXO: Mudado para %/12h ───
+                term.write(("Rate: "..info.loanRate.."%/12h  |  Max: 64 sp"):sub(1,W-2))
                 -- Row 5: term
                 term.setCursorPos(2,5) term.setTextColor(colors.gray)
                 term.write("Must repay within 5 irl days")
+                
                 -- Row 6: total cost for 64sp
                 local est=64
-                for _=1,5 do est=math.ceil(est*(1+info.loanRate/100)) end
+                -- ─── ALTERADO ABAIXO: Roda 10 vezes (2 vezes por dia ao longo de 5 dias) ───
+                for _=1,10 do est=math.ceil(est*(1+info.loanRate/100)) end
                 term.setCursorPos(2,6) term.setTextColor(colors.orange)
                 term.write(("64sp / 5 irl days = ~"..est.." sp"):sub(1,W-2))
+                
                 -- Row 7: daily interest on 64sp
-                local daily=math.ceil(64*(info.loanRate/100))
+                local period=math.ceil(64*(info.loanRate/100))
                 term.setCursorPos(2,7) term.setTextColor(colors.lightBlue)
-                term.write(("Daily interest: +"..daily.." sp/day"):sub(1,W-2))
+                -- ─── ALTERADO ABAIXO: Mudado para sp/12h ───
+                term.write(("Interest: +"..period.." sp/12h"):sub(1,W-2))
+                
                 -- Buttons: rows btnStart2+1, btnStart2+2
                 local btnStart2 = 8
                 local lOpts={{label="Get a Loan",icon=colors.green},{label="Back",icon=colors.gray}}
@@ -940,7 +950,7 @@ local function bankLoans(info)
                     if idx==2 then return  -- Back
                     elseif idx==1 then
                         local amt=amountPicker({title="Loan Amount",available=64,
-                            hint="Rate: "..info.loanRate.."%/day, 5 irl day limit"})
+                            hint="Rate: "..info.loanRate.."%/12h, 5 irl day limit"})
                         if amt then
                             -- Show repayment estimate for chosen amount
                             local res=rpc({type="bank_get_loan",token=token,amount=amt},15)
@@ -948,11 +958,13 @@ local function bankLoans(info)
                             term.setCursorPos(1,3)
                             if res and res.ok then
                                 local repay=amt
-                                for _=1,5 do repay=math.ceil(repay*(1+info.loanRate/100)) end
+                                -- ─── ALTERADO ABAIXO: Simulação do juro composto rodando 10 vezes ───
+                                for _=1,10 do repay=math.ceil(repay*(1+info.loanRate/100)) end
                                 term.setTextColor(colors.lime)
                                 term.write("Loan of "..res.amount.." sp approved!")
                                 term.setCursorPos(1,4) term.setTextColor(colors.gray)
-                                term.write(("Rate: "..res.rate.."%/day  5 irl days"):sub(1,W-2))
+                                -- ─── ALTERADO ABAIXO: Mudado para %/12h ───
+                                term.write(("Rate: "..res.rate.."%/12h  5 irl days"):sub(1,W-2))
                                 term.setCursorPos(1,5) term.setTextColor(colors.orange)
                                 term.write(("At due date: ~"..repay.." sp owed"):sub(1,W-2))
                                 term.setCursorPos(1,6) term.setTextColor(colors.lightBlue)
@@ -997,15 +1009,19 @@ local function bankMenu()
         term.setBackgroundColor(colors.black)
         term.setCursorPos(2,2) term.setTextColor(colors.gray) term.write("Balance: ")
         term.setTextColor(colors.yellow) term.write(info.balance.." sp")
+        
         -- Row 3: daily deposit interest
         term.setCursorPos(2,3)
         if info.balance > 0 then
-            local dailyDep = math.max(1, math.floor(info.balance * 0.02))
+            -- ─── ALTERADO ABAIXO: Mudado o cálculo local de 0.02 (2%) para 0.005 (0.5%) ───
+            local periodDep = math.max(1, math.floor(info.balance * 0.005))
             term.setTextColor(colors.lime)
-            term.write(("+"..dailyDep.." sp/day  (2%/day)"):sub(1,W-2))
+            -- ─── ALTERADO ABAIXO: Mudado o texto de sp/day para sp/12h ───
+            term.write(("+"..periodDep.." sp/12h  (0.5%/12h)"):sub(1,W-2))
         else
             term.setTextColor(colors.gray) term.write("Deposit coins to earn interest")
         end
+        
         -- Row 4: credit score
         term.setCursorPos(2,4) term.setTextColor(colors.gray) term.write("Credit:  ")
         term.setTextColor(creditColor(info.credit))
@@ -1018,7 +1034,7 @@ local function bankMenu()
             term.write(("Loan: "..info.loan.remaining.."sp ("..ls..")"):sub(1,W-2))
         end
         local menuItems={
-            {label="Deposit",  icon=colors.green},
+            {label="Deposit",   icon=colors.green},
             {label="Withdraw", icon=colors.blue},
             {label="Loans",    icon=colors.yellow},
             {label="Log",      icon=colors.gray},
@@ -1050,6 +1066,7 @@ local function bankMenu()
         elseif ev=="key" and p1==keys.q then return end
     end
 end
+
 local function calcTax(price)
     if price < 5 then return 0
     elseif price <= 20 then return 1
