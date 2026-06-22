@@ -1,6 +1,6 @@
 -- Cloud User v6
 local PROTOCOL = "cloud_ui"
-local API_URL  = "https://corbin-nonclimactical-rambunctiously.ngrok-free.dev"
+local API_URL  = "https://approaches-volleyball-isa-lamp.trycloudflare.com"
 
 local modemSide = nil
 for _, s in ipairs({"top","bottom","left","right","front","back"}) do
