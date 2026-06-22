@@ -1,4 +1,4 @@
--- Cloud User v6
+-- Cloud User v7
 local PROTOCOL = "cloud_ui"
 local API_URL  = "https://approaches-volleyball-isa-lamp.trycloudflare.com"
 
@@ -26,6 +26,7 @@ local username     = nil
 local isAdmin      = false
 local unreadNotifs = 0
 local needsRelogin = false
+local shiftHeld    = false   -- global para evitar "attempt to assign to undeclared" em handlers
 
 local foodSubCache   = nil
 local foodSubCacheTs = 0
@@ -75,6 +76,7 @@ local HTTP_OPS = {
     slots_spin=true, mines_start=true, mines_reveal=true, mines_cashout=true,
     get_leaderboard=true,
     admin_list_users=true, admin_create_user=true, admin_delete_user=true,
+    admin_bank_overview=true,   -- vai direto ao server (bridge não tem essa rota)
     subscription_status=true, subscription_create=true, subscription_cancel=true,
     subscription_food_items=true,
 }
@@ -2197,7 +2199,7 @@ local function minesGame()
                         if r.is_bomb then
                             grid[tile]="bomb"
                             for _,bp in ipairs(r.bombs) do if grid[bp]=="hidden" then grid[bp]="bomb" end end
-                            result_msg="BOOM! Lost "..r.wager.."sp"
+                            result_msg="BOOM! Lost "..wager.."sp"
                             result_col=colors.red state="over"
                             local bi2=rpc({type="bank_info",token=token},5)
                             bal=(bi2 and bi2.balance) or bal
@@ -2907,7 +2909,9 @@ local function userMenu()
             {label="Logout",        icon=colors.red   },
         }
         local sel=clickMenu("Cloud - "..username, menuItems, nil, 15)
-        if sel==nil or sel==8 then token=nil username=nil isAdmin=false foodSubCache=nil return
+        if sel=="__refresh__" then
+            -- só atualiza o contador de notificações, não faz nada mais
+        elseif sel==nil or sel==8 then token=nil username=nil isAdmin=false foodSubCache=nil return
         elseif sel==1 then cloudStorageMenu()
         elseif sel==2 then bankMenu()
         elseif sel==3 then marketMenu()
