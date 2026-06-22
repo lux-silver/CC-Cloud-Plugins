@@ -2,7 +2,6 @@
 local PROTOCOL = "cloud_ui"
 local API_URL  = "https://corbin-nonclimactical-rambunctiously.ngrok-free.dev"
 
-
 local modemSide = nil
 for _, s in ipairs({"top","bottom","left","right","front","back"}) do
     if peripheral.getType(s) == "modem" then modemSide = s break end
@@ -100,6 +99,44 @@ local function rpc(msg, timeout)
     return bridgeRpc(msg, timeout)
 end
 
+-- ── Persistência de sessão (evita precisar logar de novo ao reiniciar o tablet) ─
+local SESSION_FILE = "/.cloud_session"
+
+local function saveSession(tok, uname, admin)
+    local f = fs.open(SESSION_FILE, "w")
+    if f then
+        f.write(textutils.serialiseJSON({token=tok, username=uname, isAdmin=admin}))
+        f.close()
+    end
+end
+
+local function clearSession()
+    if fs.exists(SESSION_FILE) then fs.delete(SESSION_FILE) end
+end
+
+local function tryRestoreSession()
+    if not fs.exists(SESSION_FILE) then return false end
+    local f = fs.open(SESSION_FILE, "r")
+    if not f then return false end
+    local raw = f.readAll(); f.close()
+    local data = textutils.unserialiseJSON(raw)
+    if not data or not data.token then return false end
+    -- Verifica se o token ainda é válido no servidor
+    local ok2, resp = pcall(http.post, API_URL.."/session_check",
+        textutils.serialiseJSON({token=data.token}),
+        {["Content-Type"]="application/json"})
+    if not ok2 or not resp then return false end
+    local res = textutils.unserialiseJSON(resp.readAll()); resp.close()
+    if res and res.ok then
+        token = data.token
+        username = data.username
+        isAdmin = data.isAdmin or false
+        return true
+    end
+    clearSession()
+    return false
+end
+
 -- Login
 local function doLogin()
     while true do
@@ -115,6 +152,7 @@ local function doLogin()
         if res and res.ok then
             token=res.token username=uname isAdmin=res.isAdmin or false
             unreadNotifs = res.unread_notifs or 0
+            saveSession(token, username, isAdmin)
             local subR = httpRpc({type="subscription_status", token=res.token})
             if subR and subR.ok then foodSubCache=subR; foodSubCacheTs=os.epoch("utc") end
             return
@@ -3172,8 +3210,16 @@ end
 parallel.waitForAny(
     function()
         while true do
-            doLogin()
+            -- Tenta restaurar sessão salva antes de pedir login
+            if not tryRestoreSession() then
+                doLogin()
+            end
             if isAdmin then adminMenu() else userMenu() end
+            -- Se needsRelogin foi setado durante o uso, limpa a sessão salva
+            if needsRelogin then
+                clearSession()
+                needsRelogin = false
+            end
         end
     end,
     function()
