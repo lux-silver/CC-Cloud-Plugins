@@ -1221,7 +1221,7 @@ local function pickItem(source)
             local item=items[row+scroll]
             term.setCursorPos(1,row+1) term.setBackgroundColor(colors.black)
             if item then
-                term.setTextColor(itemColor(item.name)) term.write(" ")
+                term.setBackgroundColor(itemColor(item.name)) term.setTextColor(colors.black) term.write(" ") term.setBackgroundColor(colors.black)
                 local cs="x"..item.count
                 local lbl=prettyName(item):sub(1,W-3-#cs)
                 term.setTextColor(colors.white) term.write(" "..lbl)
@@ -1666,7 +1666,7 @@ local function marketMyListings()
             if l then
                 local oos=(l.stock<=0)
                 term.setCursorPos(1,ya)
-                term.setTextColor(oos and colors.gray or itemColor(l.item_name)) term.write(" ")
+                term.setBackgroundColor(oos and colors.gray or itemColor(l.item_name)) term.setTextColor(colors.black) term.write(" ") term.setBackgroundColor(colors.black)
                 local info=" x"..l.lot_size.."@"..l.price.."sp"
                 local sc=oos and " OOS" or (" S:"..l.stock)
                 local nameW=W-1-#info-#sc
