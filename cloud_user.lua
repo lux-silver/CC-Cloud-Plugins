@@ -41,6 +41,19 @@ local function itemColor(name)
     return iconColors[h + 1]
 end
 
+-- Prettify item IDs when displayName wasn't fetched (e.g. "minecraft:bone_meal" → "Bone Meal")
+local function prettyName(item)
+    local dn = item.displayName or item.name or "?"
+    -- If displayName looks like a raw ID (contains ":" and no spaces), prettify it
+    if dn:find(":") and not dn:find(" ") then
+        local plain = dn:match(":(.+)$") or dn
+        plain = plain:gsub("_", " ")
+        plain = plain:gsub("(%a)([%w_']*)", function(a,b) return a:upper()..b end)
+        return plain
+    end
+    return dn
+end
+
 local rpcSeq = 0
 local function bridgeRpc(msg, timeout)
     if not modemSide then return {ok=false, err="No modem"} end
@@ -234,7 +247,7 @@ local function itemListUI(cfg)
             local q = searchQuery:lower()
             filtered = {}
             for _, item in ipairs(items) do
-                if (item.displayName or item.name):lower():find(q, 1, true) then
+                if prettyName(item):lower():find(q, 1, true) then
                     table.insert(filtered, item)
                 end
             end
@@ -278,14 +291,14 @@ local function itemListUI(cfg)
                     term.setBackgroundColor(itemColor(item.name)) term.setTextColor(colors.black) term.write(" ")
                     if isSel then
                         local qStr = ">" .. amt .. "/" .. item.count .. "<"
-                        local lbl  = (item.displayName or item.name):sub(1, W - 2 - #qStr)
+                        local lbl  = prettyName(item):sub(1, W - 2 - #qStr)
                         term.setBackgroundColor(colors.gray) term.setTextColor(colors.yellow)
                         term.write(" " .. lbl)
                         term.setTextColor(colors.lime)
                         term.write(string.rep(" ", math.max(0, W - 2 - #lbl - #qStr)) .. qStr)
                     else
                         local cs  = "x" .. item.count
-                        local lbl = (item.displayName or item.name):sub(1, W - 3 - #cs)
+                        local lbl = prettyName(item):sub(1, W - 3 - #cs)
                         term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
                         term.write(" " .. lbl)
                         term.setTextColor(colors.cyan)
@@ -320,7 +333,7 @@ local function itemListUI(cfg)
                 local item = filtered[selIdx]
                 if item then
                     term.setTextColor(colors.yellow)
-                    term.write(("Click again to confirm (" .. (item.displayName or item.name) .. ")"):sub(1, W))
+                    term.write(("Click again to confirm (" .. prettyName(item) .. ")"):sub(1, W))
                 end
             else
                 term.setTextColor(colors.gray) term.write("RClick=full stack  Q=back")
@@ -348,7 +361,7 @@ local function itemListUI(cfg)
         local amt = math.min(getAmt(item), item.count)
         local ok, err = cfg.actionFn(item, amt)
         if ok then
-            message  = (cfg.actionLabel or "Done") .. " x" .. amt .. ": " .. (item.displayName or item.name)
+            message  = (cfg.actionLabel or "Done") .. " x" .. amt .. ": " .. prettyName(item)
             msgTimer = os.clock() + 3
             selIdx   = nil
             doFetch() applyFilter()
@@ -1210,7 +1223,7 @@ local function pickItem(source)
             if item then
                 term.setTextColor(itemColor(item.name)) term.write(" ")
                 local cs="x"..item.count
-                local lbl=(item.displayName or item.name):sub(1,W-3-#cs)
+                local lbl=prettyName(item):sub(1,W-3-#cs)
                 term.setTextColor(colors.white) term.write(" "..lbl)
                 term.setTextColor(colors.cyan)
                 term.write(string.rep(" ",math.max(0,W-3-#lbl-#cs))..cs)
@@ -1248,7 +1261,8 @@ local function marketBrowse()
     local function shortName(l)
         local dn = l.display_name
         if dn and not dn:match("^[^%s]+:") then return dn end
-        return (l.item_name:match(":(.+)$") or l.item_name):gsub("_"," ")
+        local plain = (l.item_name:match(":(.+)$") or l.item_name):gsub("_"," ")
+        return plain:gsub("(%a)([%w_']*)", function(a,b) return a:upper()..b end)
     end
     local function ppi(l) return l.price / math.max(1, l.lot_size) end
 
@@ -2096,6 +2110,7 @@ local function minesGame()
     local bi=rpc({type="bank_info",token=token},5)
     local bal=(bi and bi.balance) or 0
     local wager=math.max(1,math.min(10,bal))
+    local active_wager=wager  -- wager locked in when game starts
     local num_bombs=5
     local state="setup"
     local game_id=nil
@@ -2210,6 +2225,7 @@ local function minesGame()
                     if bal<wager then err_msg="Not enough balance" err_t=os.clock()+2
                     else
                         local r=rpc({type="mines_start",token=token,wager=wager,bombs=num_bombs},8)
+                    if r and r.ok then active_wager=wager end
                         if not r or not r.ok then err_msg=(r and r.err) or "Server error" err_t=os.clock()+3
                         else
                             game_id=r.game_id
@@ -2235,7 +2251,7 @@ local function minesGame()
                         if r.is_bomb then
                             grid[tile]="bomb"
                             for _,bp in ipairs(r.bombs) do if grid[bp]=="hidden" then grid[bp]="bomb" end end
-                            result_msg="BOOM! Lost "..r.wager.."sp"
+                            result_msg="BOOM! Lost "..(active_wager or wager).."sp"
                             result_col=colors.red state="over"
                             local bi2=rpc({type="bank_info",token=token},5)
                             bal=(bi2 and bi2.balance) or bal
