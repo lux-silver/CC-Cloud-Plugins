@@ -180,6 +180,57 @@ local function rpc(msg, timeout)
     return bridgeRpc(msg, timeout)
 end
 
+-- ── Persistência de sessão ────────────────────────────────────────────────────
+local SESSION_FILE = "/.cloud_session"
+
+local function saveSession(tok, uname, admin)
+    local f = fs.open(SESSION_FILE, "w")
+    if f then
+        f.write(textutils.serialiseJSON({token=tok, username=uname, isAdmin=admin}))
+        f.close()
+    end
+end
+
+local function clearSession()
+    if fs.exists(SESSION_FILE) then fs.delete(SESSION_FILE) end
+end
+
+-- Tenta restaurar a sessão salva em disco.
+-- IMPORTANTE: se o servidor não responder (túnel caído), NÃO limpa a sessão —
+-- assume que o token ainda é válido e deixa o usuário entrar offline.
+-- Só limpa a sessão se o servidor responder explicitamente com ok=false.
+local function tryRestoreSession()
+    if not fs.exists(SESSION_FILE) then return false end
+    local f = fs.open(SESSION_FILE, "r")
+    if not f then return false end
+    local raw = f.readAll(); f.close()
+    local data = textutils.unserialiseJSON(raw)
+    if not data or not data.token then return false end
+
+    -- Tenta validar o token no servidor
+    local res = httpPost("/session_check", {token=data.token})
+
+    if res == nil then
+        -- Servidor não respondeu (túnel caído, rede instável) —
+        -- restaura a sessão localmente sem validar para não perder acesso
+        token    = data.token
+        username = data.username
+        isAdmin  = data.isAdmin or false
+        return true   -- entra "otimisticamente" — se o token expirou, needsRelogin vai pegar depois
+    end
+
+    if res.ok then
+        token    = data.token
+        username = data.username or res.username
+        isAdmin  = data.isAdmin or res.isAdmin or false
+        return true
+    end
+
+    -- Servidor respondeu e disse que o token é inválido — aí sim limpa
+    clearSession()
+    return false
+end
+
 -- Login
 local function doLogin()
     while true do
