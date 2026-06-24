@@ -54,14 +54,33 @@ local function prettyName(item)
     return dn
 end
 
-local rpcSeq = 0
+local rpcSeq   = 0
+local rpcBuf   = {}   -- [seq] = response, buffer for out-of-order replies
+
+-- Drains any stale buffered responses older than current seq
+local function drainRpcBuf()
+    for k in pairs(rpcBuf) do
+        if k < rpcSeq then rpcBuf[k] = nil end
+    end
+end
+
 local function bridgeRpc(msg, timeout)
     if not modemSide then return {ok=false, err="No modem"} end
     rpcSeq = rpcSeq + 1
     msg._seq = rpcSeq
     local mySeq = rpcSeq
+    drainRpcBuf()
+
+    -- Already buffered from a previous receive pass?
+    if rpcBuf[mySeq] then
+        local r = rpcBuf[mySeq]
+        rpcBuf[mySeq] = nil
+        return r
+    end
+
     if serverId then rednet.send(serverId, msg, PROTOCOL)
     else rednet.broadcast(msg, PROTOCOL) end
+
     local deadline = os.clock() + (timeout or 5)
     while true do
         local remaining = deadline - os.clock()
@@ -69,9 +88,15 @@ local function bridgeRpc(msg, timeout)
         local id, res = rednet.receive(PROTOCOL, remaining)
         if not res then return nil end
         if id then serverId = id end
-        if type(res) == "table" and res._seq == mySeq then
-            if res.err == "Session expired" then needsRelogin = true end
-            return res
+        if type(res) == "table" and res._seq ~= nil then
+            if res._seq == mySeq then
+                if res.err == "Session expired" then needsRelogin = true end
+                return res
+            elseif res._seq > mySeq then
+                -- Future response — buffer it, keep waiting
+                rpcBuf[res._seq] = res
+            end
+            -- Past response (res._seq < mySeq) — discard, already handled
         end
     end
 end
