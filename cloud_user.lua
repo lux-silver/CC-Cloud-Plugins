@@ -1,6 +1,32 @@
 -- Cloud User v6
 local PROTOCOL = "cloud_ui"
-local API_URL  = "https://corbin-nonclimactical-rambunctiously.ngrok-free.dev"
+-- API_URL é dinâmica — buscada do GitHub no boot e refreshada a cada 5min
+local URL_SRC    = "https://raw.githubusercontent.com/lux-silver/Cloud-Horizon/main/tunnel_url.txt"
+local URL_CACHE  = "/.cloud_api_url"
+local API_URL    = ""
+
+local function loadApiUrl()
+    -- 1. Tenta GitHub
+    local ok, res = pcall(http.get, URL_SRC)
+    if ok and res then
+        local u = res.readAll():gsub("%s+",""); res.close()
+        if u and #u > 10 then
+            API_URL = u
+            local f = fs.open(URL_CACHE,"w"); f.write(u); f.close()
+            return true
+        end
+    end
+    -- 2. Cache local
+    if fs.exists(URL_CACHE) then
+        local f = fs.open(URL_CACHE,"r")
+        local u = f.readAll():gsub("%s+",""); f.close()
+        if u and #u > 10 then API_URL = u; return true end
+    end
+    return false
+end
+
+-- Carrega no boot (antes de qualquer HTTP)
+loadApiUrl()
 
 local modemSide = nil
 for _, s in ipairs({"top","bottom","left","right","front","back"}) do
@@ -3338,9 +3364,9 @@ parallel.waitForAny(
                     term.setCursorPos(2,3) term.setTextColor(colors.yellow)
                     term.write("Tunnel unreachable.")
                     term.setCursorPos(2,4) term.setTextColor(colors.gray)
-                    term.write("Your session has been maintained.")
-                    term.setCursorPos(2,5) term.write("Press any key")
-                    term.setCursorPos(2,6) term.write("to try to reconnect...")
+                    term.write("Sua sessão foi mantida.")
+                    term.setCursorPos(2,5) term.write("Pressione qualquer tecla")
+                    term.setCursorPos(2,6) term.write("para tentar reconectar...")
                     os.pullEvent()
                     needsRelogin = false
                     -- volta ao loop — tryRestoreSession vai restaurar do arquivo
@@ -3354,9 +3380,20 @@ parallel.waitForAny(
         end
     end,
     function()
+        local _urlTick = 0
         while true do
             sleep(60)
             checkAndDeliverFood()
+            -- Refresh API URL a cada 5min (5 × 60s)
+            _urlTick = _urlTick + 1
+            if _urlTick % 5 == 0 then
+                local oldUrl = API_URL
+                loadApiUrl()
+                if API_URL ~= oldUrl and API_URL ~= "" then
+                    -- URL mudou — força relogin para reconectar
+                    needsRelogin = true
+                end
+            end
         end
     end
 )
