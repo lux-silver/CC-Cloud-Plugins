@@ -3338,9 +3338,9 @@ parallel.waitForAny(
                     term.setCursorPos(2,3) term.setTextColor(colors.yellow)
                     term.write("Tunnel unreachable.")
                     term.setCursorPos(2,4) term.setTextColor(colors.gray)
-                    term.write("Sua sessão foi mantida.")
-                    term.setCursorPos(2,5) term.write("Pressione qualquer tecla")
-                    term.setCursorPos(2,6) term.write("para tentar reconectar...")
+                    term.write("Your session has been maintained.")
+                    term.setCursorPos(2,5) term.write("Press any key")
+                    term.setCursorPos(2,6) term.write("to try to reconnect...")
                     os.pullEvent()
                     needsRelogin = false
                     -- volta ao loop — tryRestoreSession vai restaurar do arquivo
