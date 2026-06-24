@@ -208,6 +208,7 @@ end
 
 -- ── Persistência de sessão ────────────────────────────────────────────────────
 local SESSION_FILE = "/.cloud_session"
+local CREDS_FILE   = "/.cloud_creds"   -- saved username + password (opt-in)
 
 local function saveSession(tok, uname, admin)
     local f = fs.open(SESSION_FILE, "w")
@@ -219,6 +220,26 @@ end
 
 local function clearSession()
     if fs.exists(SESSION_FILE) then fs.delete(SESSION_FILE) end
+end
+
+local function saveCreds(uname, pass)
+    local f = fs.open(CREDS_FILE, "w")
+    if f then
+        f.write(textutils.serialiseJSON({username=uname, password=pass}))
+        f.close()
+    end
+end
+
+local function loadCreds()
+    if not fs.exists(CREDS_FILE) then return nil end
+    local f = fs.open(CREDS_FILE, "r")
+    if not f then return nil end
+    local d = textutils.unserialiseJSON(f.readAll()); f.close()
+    return (d and d.username and d.password) and d or nil
+end
+
+local function clearCreds()
+    if fs.exists(CREDS_FILE) then fs.delete(CREDS_FILE) end
 end
 
 -- Tenta restaurar a sessão salva em disco.
@@ -257,37 +278,159 @@ local function tryRestoreSession()
     return false
 end
 
--- Login
+-- ── Login screen ─────────────────────────────────────────────────────────────
 local function doLogin()
+    -- Pre-fill from saved creds if available
+    local saved     = loadCreds()
+    local prefillU  = saved and saved.username or ""
+    local prefillP  = saved and saved.password or ""
+    local remember  = saved ~= nil  -- checkbox state
+
     while true do
+        W, H = term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
-        term.setCursorPos(1,1) term.clearLine() term.write(" Cloud Storage")
-        term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
-        term.setCursorPos(1,3) term.write("Username: ")
-        local uname = read()
-        term.setCursorPos(1,4) term.write("Password: ")
-        local pass = read("*")
-        -- Mostra "Conectando..." enquanto tenta
-        term.setCursorPos(1,6) term.setTextColor(colors.gray) term.write("Connecting...")
-        local res = rpc({ type="login", username=uname, password=pass })
-        term.setCursorPos(1,6) term.setBackgroundColor(colors.black) term.write(string.rep(" ", W))
-        if res and res.ok then
-            token=res.token username=uname isAdmin=res.isAdmin or false
-            unreadNotifs = res.unread_notifs or 0
-            saveSession(token, username, isAdmin)
-            local subR = httpRpc({type="subscription_status", token=res.token})
-            if subR and subR.ok then foodSubCache=subR; foodSubCacheTs=os.epoch("utc") end
-            return
-        else
-            term.setCursorPos(1,6) term.setTextColor(colors.red)
-            if res == nil then
-                term.write("Server unreachable (tunnel down?)")
+
+        -- Header
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.black)
+        term.setCursorPos(1,1) term.clearLine()
+        term.write(" Cloud  Login")
+
+        -- Fields
+        local uRow, pRow, cbRow, btnRow = 3, 5, 7, 9
+
+        local function drawField(row, label, val, masked)
+            term.setCursorPos(1, row)
+            term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
+            term.clearLine() term.write(" "..label)
+            term.setCursorPos(1, row+1) term.clearLine()
+            term.setBackgroundColor(colors.gray) term.setTextColor(colors.black)
+            local display = masked and string.rep("*", #val) or val
+            local box = " "..(display:sub(-(W-3))):sub(1,W-2)
+            term.write(box..string.rep(" ", W - #box))
+            term.setBackgroundColor(colors.black)
+        end
+
+        local function drawCheckbox()
+            term.setCursorPos(1, cbRow)
+            term.setBackgroundColor(colors.black) term.clearLine()
+            term.setBackgroundColor(remember and colors.lime or colors.gray)
+            term.setTextColor(colors.black)
+            term.write(remember and " x " or "   ")
+            term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
+            term.write("  Remember me")
+        end
+
+        local function drawBtn(msg)
+            term.setCursorPos(1, btnRow)
+            term.setBackgroundColor(colors.black) term.clearLine()
+            term.setBackgroundColor(colors.orange) term.setTextColor(colors.black)
+            term.write(" Login ")
+            term.setBackgroundColor(colors.black) term.setTextColor(colors.red)
+            if msg then
+                term.setCursorPos(1, btnRow+1) term.clearLine()
+                term.setTextColor(colors.red) term.write(" "..msg:sub(1, W-2))
             else
-                term.write(res.err or "Login failed")
+                term.setCursorPos(1, btnRow+1) term.clearLine()
             end
-            term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key to retry...")
-            os.pullEvent()
+        end
+
+        drawField(uRow, "Username", prefillU, false)
+        drawField(pRow, "Password", prefillP, true)
+        drawCheckbox()
+        drawBtn(nil)
+
+        -- Input loop: click field to edit, click checkbox to toggle, click Login
+        local editing = nil   -- "user" | "pass" | nil
+        local errMsg  = nil
+
+        local function startEdit(field)
+            editing = field
+            local row   = field == "user" and (uRow+1) or (pRow+1)
+            local val   = field == "user" and prefillU or prefillP
+            local masked = field == "pass"
+            term.setCursorPos(1, row)
+            term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+            local display = masked and string.rep("*", #val) or val
+            local box = " "..display:sub(-(W-3))
+            term.write(box..string.rep(" ", W - #box))
+            term.setCursorPos(2 + math.min(#val, W-3), row)
+            term.setCursorBlink(true)
+            local result = read(masked and "*" or nil,
+                nil, nil, field == "user" and prefillU or prefillP)
+            term.setCursorBlink(false)
+            if field == "user" then prefillU = result
+            else prefillP = result end
+            editing = nil
+            -- Redraw updated field
+            drawField(uRow, "Username", prefillU, false)
+            drawField(pRow, "Password", prefillP, true)
+        end
+
+        local function tryLogin()
+            drawBtn(nil)
+            term.setCursorPos(1, btnRow+1)
+            term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
+            term.clearLine() term.write(" Connecting...")
+            local res = rpc({type="login", username=prefillU, password=prefillP})
+            if res and res.ok then
+                token    = res.token
+                username = prefillU
+                isAdmin  = res.isAdmin or false
+                unreadNotifs = res.unread_notifs or 0
+                saveSession(token, username, isAdmin)
+                if remember then
+                    saveCreds(prefillU, prefillP)
+                else
+                    clearCreds()
+                end
+                local subR = httpRpc({type="subscription_status", token=res.token})
+                if subR and subR.ok then foodSubCache=subR; foodSubCacheTs=os.epoch("utc") end
+                return true
+            else
+                errMsg = (res == nil) and "Server unreachable" or (res.err or "Login failed")
+                drawBtn(errMsg)
+                return false
+            end
+        end
+
+        -- If we have saved creds, try auto-login once silently
+        if saved and prefillU ~= "" and prefillP ~= "" then
+            if tryLogin() then return end
+            -- Auto-login failed — show form with error already set
+            drawField(uRow, "Username", prefillU, false)
+            drawField(pRow, "Password", prefillP, true)
+            drawCheckbox()
+        end
+
+        while true do
+            local ev, p1, p2, p3 = os.pullEvent()
+
+            if ev == "mouse_click" then
+                local mx, my = p2, p3
+                -- Username field
+                if my == uRow+1 then
+                    startEdit("user")
+                -- Password field
+                elseif my == pRow+1 then
+                    startEdit("pass")
+                -- Checkbox
+                elseif my == cbRow then
+                    remember = not remember
+                    drawCheckbox()
+                -- Login button
+                elseif my == btnRow and mx <= 7 then
+                    if tryLogin() then return end
+                end
+
+            elseif ev == "key" then
+                if p1 == keys.tab then
+                    -- Tab cycles: user → pass → login
+                    if editing == nil then startEdit("user")
+                    end
+                elseif p1 == keys.enter then
+                    if tryLogin() then return end
+                end
+            end
         end
     end
 end
@@ -3043,7 +3186,7 @@ local function userMenu()
             {label="Logout",        icon=colors.red   },
         }
         local sel=clickMenu("Cloud - "..username, menuItems, nil, 15)
-        if sel==nil or sel==8 then token=nil username=nil isAdmin=false foodSubCache=nil return
+        if sel==nil or sel==8 then clearSession() token=nil username=nil isAdmin=false foodSubCache=nil return
         elseif sel==1 then cloudStorageMenu()
         elseif sel==2 then bankMenu()
         elseif sel==3 then marketMenu()
@@ -3121,7 +3264,7 @@ local function adminMenu()
         msg2 = ""
 
         if sel == nil or sel == 6 then
-            token=nil username=nil isAdmin=false return
+            clearSession() token=nil username=nil isAdmin=false return
 
         elseif sel == 1 then
             -- List users
