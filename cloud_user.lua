@@ -54,27 +54,35 @@ local function prettyName(item)
     return dn
 end
 
-local rpcSeq   = 0
-local rpcBuf   = {}   -- [seq] = response, buffer for out-of-order replies
-
--- Drains any stale buffered responses older than current seq
-local function drainRpcBuf()
-    for k in pairs(rpcBuf) do
-        if k < rpcSeq then rpcBuf[k] = nil end
-    end
-end
+local rpcSeq    = 0
+local rpcBusy   = false   -- serial lock: only one bridgeRpc at a time
+local rpcBuf    = {}      -- [seq] = response buffered while waiting for another seq
 
 local function bridgeRpc(msg, timeout)
     if not modemSide then return {ok=false, err="No modem"} end
-    rpcSeq = rpcSeq + 1
-    msg._seq = rpcSeq
-    local mySeq = rpcSeq
-    drainRpcBuf()
 
-    -- Already buffered from a previous receive pass?
+    -- Serial gate: se já tem um request em andamento, espera até 2s antes de prosseguir
+    -- Isso evita que spam mande seq=N+1 antes de seq=N ser respondido
+    local gateDeadline = os.clock() + 2
+    while rpcBusy and os.clock() < gateDeadline do
+        sleep(0.05)
+    end
+    rpcBusy = true
+
+    rpcSeq = rpcSeq + 1
+    local mySeq = rpcSeq
+    msg._seq = mySeq
+
+    -- Limpa respostas antigas do buffer
+    for k in pairs(rpcBuf) do
+        if k < mySeq then rpcBuf[k] = nil end
+    end
+
+    -- Já tem no buffer (chegou fora de ordem antes)?
     if rpcBuf[mySeq] then
         local r = rpcBuf[mySeq]
         rpcBuf[mySeq] = nil
+        rpcBusy = false
         return r
     end
 
@@ -84,20 +92,37 @@ local function bridgeRpc(msg, timeout)
     local deadline = os.clock() + (timeout or 5)
     while true do
         local remaining = deadline - os.clock()
-        if remaining <= 0 then return nil end
+        if remaining <= 0 then
+            rpcBusy = false
+            return nil
+        end
         local id, res = rednet.receive(PROTOCOL, remaining)
-        if not res then return nil end
+        if not res then
+            rpcBusy = false
+            return nil
+        end
         if id then serverId = id end
-        if type(res) == "table" and res._seq ~= nil then
-            if res._seq == mySeq then
+        if type(res) ~= "table" then -- ignorar não-tabelas
+        elseif res._seq == nil then  -- resposta sem seq (protocolo antigo) — aceita
+            rpcBusy = false
+            return res
+        elseif res._seq == mySeq then
+            rpcBusy = false
+            -- Bridge busy: espera 0.3s e tenta de novo (não dessincroniza)
+            if res.err == "Bridge busy" then
+                sleep(0.3)
+                rpcBusy = true
+                if serverId then rednet.send(serverId, msg, PROTOCOL)
+                else rednet.broadcast(msg, PROTOCOL) end
+                deadline = os.clock() + (timeout or 5)
+            else
                 if res.err == "Session expired" then needsRelogin = true end
                 return res
-            elseif res._seq > mySeq then
-                -- Future response — buffer it, keep waiting
-                rpcBuf[res._seq] = res
             end
-            -- Past response (res._seq < mySeq) — discard, already handled
+        elseif res._seq > mySeq then
+            rpcBuf[res._seq] = res  -- guarda para o próximo bridgeRpc
         end
+        -- res._seq < mySeq: resposta velha, descarta
     end
 end
 
