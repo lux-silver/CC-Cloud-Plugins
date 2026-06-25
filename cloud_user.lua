@@ -280,158 +280,155 @@ end
 
 -- ── Login screen ─────────────────────────────────────────────────────────────
 local function doLogin()
-    -- Pre-fill from saved creds if available
-    local saved     = loadCreds()
-    local prefillU  = saved and saved.username or ""
-    local prefillP  = saved and saved.password or ""
-    local remember  = saved ~= nil  -- checkbox state
+    local saved    = loadCreds()
+    local uname    = saved and saved.username or ""
+    local pass     = saved and saved.password or ""
+    local remember = saved ~= nil
 
-    while true do
+    local uRow, pRow, cbRow, btnRow = 3, 5, 7, 9
+
+    -- Redraw entire screen
+    local errMsg = ""
+    local function redraw()
         W, H = term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
-
         -- Header
         term.setBackgroundColor(colors.orange) term.setTextColor(colors.black)
-        term.setCursorPos(1,1) term.clearLine()
-        term.write(" Cloud  Login")
+        term.setCursorPos(1,1) term.clearLine() term.write(" Cloud  Login")
+        term.setBackgroundColor(colors.black)
+        -- Username label + value (plain, no bg)
+        term.setCursorPos(1, uRow) term.setTextColor(colors.gray) term.clearLine()
+        term.write(" Username")
+        term.setCursorPos(1, uRow+1) term.clearLine()
+        term.setTextColor(colors.white) term.write(" "..uname)
+        -- Password label + value (plain, no bg)
+        term.setCursorPos(1, pRow) term.setTextColor(colors.gray) term.clearLine()
+        term.write(" Password")
+        term.setCursorPos(1, pRow+1) term.clearLine()
+        term.setTextColor(colors.white) term.write(" "..string.rep("*", #pass))
+        -- Checkbox  [ ] / [X]
+        term.setCursorPos(1, cbRow) term.clearLine()
+        term.setTextColor(colors.white)
+        term.write(remember and " [X] Remember me" or " [ ] Remember me")
+        -- Login button
+        term.setCursorPos(1, btnRow)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.black)
+        term.write(" Login ")
+        term.setBackgroundColor(colors.black)
+        -- Error message
+        term.setCursorPos(1, btnRow+1) term.clearLine()
+        term.setTextColor(colors.red) term.write(errMsg ~= "" and " "..errMsg or "")
+    end
 
-        -- Fields
-        local uRow, pRow, cbRow, btnRow = 3, 5, 7, 9
-
-        local function drawField(row, label, val, masked)
-            term.setCursorPos(1, row)
-            term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
-            term.clearLine() term.write(" "..label)
-            term.setCursorPos(1, row+1) term.clearLine()
-            term.setBackgroundColor(colors.gray) term.setTextColor(colors.black)
-            local display = masked and string.rep("*", #val) or val
-            local box = " "..(display:sub(-(W-3))):sub(1,W-2)
-            term.write(box..string.rep(" ", W - #box))
-            term.setBackgroundColor(colors.black)
+    local function tryLogin()
+        errMsg = ""
+        redraw()
+        term.setCursorPos(1, btnRow+1) term.clearLine()
+        term.setTextColor(colors.gray) term.write(" Connecting...")
+        local res = rpc({type="login", username=uname, password=pass})
+        if res and res.ok then
+            token    = res.token
+            username = uname
+            isAdmin  = res.isAdmin or false
+            unreadNotifs = res.unread_notifs or 0
+            saveSession(token, username, isAdmin)
+            if remember then saveCreds(uname, pass) else clearCreds() end
+            local subR = httpRpc({type="subscription_status", token=res.token})
+            if subR and subR.ok then foodSubCache=subR; foodSubCacheTs=os.epoch("utc") end
+            return true
         end
+        errMsg = (res == nil) and "Server unreachable" or (res.err or "Login failed")
+        redraw()
+        return false
+    end
 
-        local function drawCheckbox()
-            term.setCursorPos(1, cbRow)
-            term.setBackgroundColor(colors.black) term.clearLine()
-            term.setBackgroundColor(remember and colors.lime or colors.gray)
-            term.setTextColor(colors.black)
-            term.write(remember and " x " or "   ")
-            term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
-            term.write("  Remember me")
-        end
+    -- Auto-login if creds saved
+    if saved and uname ~= "" and pass ~= "" then
+        if tryLogin() then return end
+    end
 
-        local function drawBtn(msg)
-            term.setCursorPos(1, btnRow)
-            term.setBackgroundColor(colors.black) term.clearLine()
-            term.setBackgroundColor(colors.orange) term.setTextColor(colors.black)
-            term.write(" Login ")
-            term.setBackgroundColor(colors.black) term.setTextColor(colors.red)
-            if msg then
-                term.setCursorPos(1, btnRow+1) term.clearLine()
-                term.setTextColor(colors.red) term.write(" "..msg:sub(1, W-2))
-            else
-                term.setCursorPos(1, btnRow+1) term.clearLine()
-            end
-        end
-
-        drawField(uRow, "Username", prefillU, false)
-        drawField(pRow, "Password", prefillP, true)
-        drawCheckbox()
-        drawBtn(nil)
-
-        -- Input loop: click field to edit, click checkbox to toggle, click Login
-        local editing = nil   -- "user" | "pass" | nil
-        local errMsg  = nil
-
-        local function startEdit(field)
-            editing = field
-            local row   = field == "user" and (uRow+1) or (pRow+1)
-            local val   = field == "user" and prefillU or prefillP
-            local masked = field == "pass"
-            term.setCursorPos(1, row)
+    -- Manual line-read that also handles mouse clicks on checkbox/button
+    local function readLine(row, masked, prefill)
+        local buf = prefill or ""
+        -- Draw active field
+        local function drawActive()
+            term.setCursorPos(1, row) term.clearLine()
             term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
-            local display = masked and string.rep("*", #val) or val
-            local box = " "..display:sub(-(W-3))
-            term.write(box..string.rep(" ", W - #box))
-            term.setCursorPos(2 + math.min(#val, W-3), row)
-            term.setCursorBlink(true)
-            local result = read(masked and "*" or nil,
-                nil, nil, field == "user" and prefillU or prefillP)
-            term.setCursorBlink(false)
-            if field == "user" then prefillU = result
-            else prefillP = result end
-            editing = nil
-            -- Redraw updated field
-            drawField(uRow, "Username", prefillU, false)
-            drawField(pRow, "Password", prefillP, true)
+            local shown = masked and string.rep("*", #buf) or buf
+            term.write(" "..shown:sub(-(W-2))..string.rep(" ", math.max(0, W-2-#shown)))
+            term.setBackgroundColor(colors.black)
+            term.setCursorPos(math.min(2 + #buf, W), row)
         end
-
-        local function tryLogin()
-            drawBtn(nil)
-            term.setCursorPos(1, btnRow+1)
-            term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
-            term.clearLine() term.write(" Connecting...")
-            local res = rpc({type="login", username=prefillU, password=prefillP})
-            if res and res.ok then
-                token    = res.token
-                username = prefillU
-                isAdmin  = res.isAdmin or false
-                unreadNotifs = res.unread_notifs or 0
-                saveSession(token, username, isAdmin)
-                if remember then
-                    saveCreds(prefillU, prefillP)
-                else
-                    clearCreds()
-                end
-                local subR = httpRpc({type="subscription_status", token=res.token})
-                if subR and subR.ok then foodSubCache=subR; foodSubCacheTs=os.epoch("utc") end
-                return true
-            else
-                errMsg = (res == nil) and "Server unreachable" or (res.err or "Login failed")
-                drawBtn(errMsg)
-                return false
-            end
-        end
-
-        -- If we have saved creds, try auto-login once silently
-        if saved and prefillU ~= "" and prefillP ~= "" then
-            if tryLogin() then return end
-            -- Auto-login failed — show form with error already set
-            drawField(uRow, "Username", prefillU, false)
-            drawField(pRow, "Password", prefillP, true)
-            drawCheckbox()
-        end
-
+        drawActive()
+        term.setCursorBlink(true)
         while true do
             local ev, p1, p2, p3 = os.pullEvent()
-
-            if ev == "mouse_click" then
-                local mx, my = p2, p3
-                -- Username field
-                if my == uRow+1 then
-                    startEdit("user")
-                -- Password field
-                elseif my == pRow+1 then
-                    startEdit("pass")
-                -- Checkbox
-                elseif my == cbRow then
-                    remember = not remember
-                    drawCheckbox()
-                -- Login button
-                elseif my == btnRow and mx <= 7 then
-                    if tryLogin() then return end
-                end
-
+            if ev == "char" then
+                buf = buf .. p1
+                drawActive()
             elseif ev == "key" then
-                if p1 == keys.tab then
-                    -- Tab cycles: user → pass → login
-                    if editing == nil then startEdit("user")
-                    end
-                elseif p1 == keys.enter then
-                    if tryLogin() then return end
+                if p1 == keys.enter then
+                    term.setCursorBlink(false)
+                    return buf, "enter"
+                elseif p1 == keys.tab then
+                    term.setCursorBlink(false)
+                    return buf, "tab"
+                elseif p1 == keys.backspace then
+                    buf = buf:sub(1, -2)
+                    drawActive()
+                end
+            elseif ev == "mouse_click" then
+                local mx, my = p2, p3
+                -- Checkbox click
+                if my == cbRow then
+                    remember = not remember
+                    term.setCursorBlink(false)
+                    term.setCursorPos(1, cbRow) term.clearLine()
+                    term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
+                    term.write(remember and " [X] Remember me" or " [ ] Remember me")
+                    drawActive()
+                    term.setCursorBlink(true)
+                -- Login button click
+                elseif my == btnRow then
+                    term.setCursorBlink(false)
+                    return buf, "login"
+                -- Click other field
+                elseif my == uRow+1 then
+                    term.setCursorBlink(false)
+                    return buf, "goto_user"
+                elseif my == pRow+1 then
+                    term.setCursorBlink(false)
+                    return buf, "goto_pass"
                 end
             end
         end
+    end
+
+    while true do
+        redraw()
+        local action
+
+        -- Username field
+        term.setCursorPos(1, uRow+1) term.clearLine()
+        term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
+        term.write(string.rep("-", W))
+        uname, action = readLine(uRow+1, false, uname)
+        term.setCursorPos(1, uRow+1) term.clearLine()
+        term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
+        term.write(" "..uname)
+
+        if action == "login" or action == "goto_pass" or action == "enter" then
+            -- Password field
+            pass, action = readLine(pRow+1, true, pass)
+            term.setCursorPos(1, pRow+1) term.clearLine()
+            term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
+            term.write(" "..string.rep("*", #pass))
+        end
+
+        if action == "login" or action == "enter" then
+            if tryLogin() then return end
+        end
+        -- Any other action loops back to redraw + username
     end
 end
 
