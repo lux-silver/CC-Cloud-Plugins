@@ -207,8 +207,9 @@ local function rpc(msg, timeout)
 end
 
 -- ── Persistência de sessão ────────────────────────────────────────────────────
-local SESSION_FILE = "/.cloud_session"
-local CREDS_FILE   = "/.cloud_creds"   -- saved username + password (opt-in)
+local SESSION_FILE  = "/.cloud_session"
+local CREDS_FILE    = "/.cloud_creds"   -- saved username + password (opt-in)
+local _manualLogout = false             -- skip auto-login after explicit logout
 
 local function saveSession(tok, uname, admin)
     local f = fs.open(SESSION_FILE, "w")
@@ -342,10 +343,11 @@ local function doLogin()
         return false
     end
 
-    -- Auto-login if creds saved
-    if saved and uname ~= "" and pass ~= "" then
+    -- Auto-login if creds saved — skip after manual logout
+    if not _manualLogout and saved and uname ~= "" and pass ~= "" then
         if tryLogin() then return end
     end
+    _manualLogout = false  -- reset after first doLogin call
 
     -- Manual line-read that also handles mouse clicks on checkbox/button
     local function readLine(row, masked, prefill)
@@ -3183,7 +3185,7 @@ local function userMenu()
             {label="Logout",        icon=colors.red   },
         }
         local sel=clickMenu("Cloud - "..username, menuItems, nil, 15)
-        if sel==nil or sel==8 then clearSession() token=nil username=nil isAdmin=false foodSubCache=nil return
+        if sel==nil or sel==8 then _manualLogout=true clearSession() token=nil username=nil isAdmin=false foodSubCache=nil return
         elseif sel==1 then cloudStorageMenu()
         elseif sel==2 then bankMenu()
         elseif sel==3 then marketMenu()
@@ -3261,7 +3263,7 @@ local function adminMenu()
         msg2 = ""
 
         if sel == nil or sel == 6 then
-            clearSession() token=nil username=nil isAdmin=false return
+            _manualLogout=true clearSession() token=nil username=nil isAdmin=false return
 
         elseif sel == 1 then
             -- List users
@@ -3512,6 +3514,7 @@ parallel.waitForAny(
                     -- volta ao loop — tryRestoreSession vai restaurar do arquivo
                 else
                     -- Servidor respondeu: token inválido de verdade, força login
+                    _manualLogout = false  -- server kicked us, allow auto-login retry
                     clearSession()
                     needsRelogin = false
                     token=nil username=nil isAdmin=false
