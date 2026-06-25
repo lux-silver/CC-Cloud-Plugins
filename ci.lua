@@ -6,13 +6,14 @@ if fs.exists("cloud_user.lua") then
     fs.delete("cloud_user.lua")
 end
 
-if fs.exists("plugins/install.lua") then
-    print("Removing old plugins/install.lua...")
-    fs.delete("plugins/install.lua")
-
 -- 2. Create plugins folder first to ensure the path exists
 if not fs.exists("plugins") then
     fs.makeDir("plugins")
+end
+
+if fs.exists("plugins/install.lua") then
+    print("Removing old plugins/install.lua...")
+    fs.delete("plugins/install.lua")
 end
 
 -- 3. Download cloud.lua and the main plugin installer
