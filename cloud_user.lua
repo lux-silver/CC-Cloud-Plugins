@@ -164,6 +164,8 @@ local HTTP_OPS = {
     slots_spin=true, mines_start=true, mines_reveal=true, mines_cashout=true,
     get_leaderboard=true,
     admin_list_users=true, admin_create_user=true, admin_delete_user=true,
+    admin_set_vault=true, admin_set_invmgr=true, admin_update_user=true, admin_get_user=true,
+    admin_bank_overview=true, admin_bank_health=true, admin_adjust_balance=true, admin_forgive_loan=true,
     subscription_status=true, subscription_create=true, subscription_cancel=true,
     subscription_food_items=true,
 }
