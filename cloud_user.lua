@@ -3334,45 +3334,88 @@ local function adminMenu()
             if not target then
                 if err then msg2=err mt2=os.clock()+2 end
             else
+                -- Helper: input a number, returns "prefix_N" or nil
+                local function inputPeriphNum(header, prompt, prefix)
+                    term.setBackgroundColor(colors.black) term.clear()
+                    term.setBackgroundColor(colors.orange) term.setTextColor(colors.black)
+                    term.setCursorPos(1,1) term.clearLine() term.write(" "..header)
+                    term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
+                    term.setCursorPos(2,3) term.write(prompt)
+                    term.setCursorPos(2,4) term.setTextColor(colors.white) term.write("> ")
+                    local n = read()
+                    if n and n ~= "" then return prefix..n end
+                    return nil
+                end
+
+                local subMsg = ""
                 local subItems = {
                     { label="View Vault",      icon=colors.cyan   },
                     { label="View Inventory",  icon=colors.blue   },
                     { label="Withdraw",        icon=colors.green  },
                     { label="Deposit",         icon=colors.lime   },
+                    { label="Set Vault #",     icon=colors.orange },
+                    { label="Set InvMgr #",    icon=colors.yellow },
                     { label="Delete User",     icon=colors.red    },
                     { label="Back",            icon=colors.gray   },
                 }
                 while true do
-                    local sub = clickMenu("Manage: " .. target, subItems)
-                    if sub == nil or sub == 6 then break
+                    local sub = clickMenu("Manage: "..target, subItems, subMsg)
+                    subMsg = ""
+                    if sub == nil or sub == 8 then break
+
                     elseif sub == 1 then
                         itemListUI({title=target.." Vault", readOnly=true,
                             fetchFn=function() local r=rpc({type="admin_view_vault",token=token,username=target}) return r or {} end})
+
                     elseif sub == 2 then
                         itemListUI({title=target.." Inventory", readOnly=true,
                             fetchFn=function() local r=rpc({type="admin_view_inventory",token=token,username=target}) return r or {} end})
+
                     elseif sub == 3 then
                         itemListUI({title="Withdraw: "..target, actionLabel="Withdrew",
                             fetchFn=function() local r=rpc({type="admin_view_vault",token=token,username=target}) return r or {} end,
                             actionFn=function(item,amt)
                                 local r=rpc({type="admin_withdraw",token=token,username=target,name=item.name,count=amt},10)
                                 return r and r.ok, r and r.err end})
+
                     elseif sub == 4 then
                         itemListUI({title="Deposit: "..target, actionLabel="Deposited",
                             fetchFn=function() local r=rpc({type="admin_view_inventory",token=token,username=target}) return r or {} end,
                             actionFn=function(item,amt)
                                 local r=rpc({type="admin_deposit",token=token,username=target,name=item.name,count=amt},10)
                                 return r and r.ok, r and r.err end})
+
                     elseif sub == 5 then
+                        -- Set Vault number
+                        local vault = inputPeriphNum("Set Vault — "..target,
+                            "Enter vault number (e.g. 5 → create:item_vault_5):",
+                            "create:item_vault_")
+                        if vault then
+                            local r = rpc({type="admin_set_vault", token=token, username=target, vault=vault}, 10)
+                            subMsg = (r and r.ok) and "Vault set: "..vault or ((r and r.err) or "Failed")
+                        end
+
+                    elseif sub == 6 then
+                        -- Set InvMgr number
+                        local invmgr = inputPeriphNum("Set InvMgr — "..target,
+                            "Enter inv manager number (e.g. 3 → inventory_manager_3):",
+                            "inventory_manager_")
+                        if invmgr then
+                            local r = rpc({type="admin_set_invmgr", token=token, username=target, invmanager=invmgr}, 10)
+                            subMsg = (r and r.ok) and "InvMgr set: "..invmgr or ((r and r.err) or "Failed")
+                        end
+
+                    elseif sub == 7 then
+                        -- Delete user
                         term.setBackgroundColor(colors.black) term.clear()
                         term.setBackgroundColor(colors.red) term.setTextColor(colors.white)
                         term.setCursorPos(1,1) term.clearLine() term.write(" Confirm Delete")
                         term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
-                        term.setCursorPos(1,3) term.write("Delete " .. target .. "?")
+                        term.setCursorPos(1,3) term.write("Delete "..target.."?")
                         term.setCursorPos(1,5)
-                        term.setBackgroundColor(colors.red)    term.write(" Yes ")
-                        term.setBackgroundColor(colors.black)  term.write("   ")
-                        term.setBackgroundColor(colors.gray)   term.write(" No ")
+                        term.setBackgroundColor(colors.red)   term.write(" Yes ")
+                        term.setBackgroundColor(colors.black) term.write("   ")
+                        term.setBackgroundColor(colors.gray)  term.write(" No ")
                         while true do
                             local ev4,p4,p5,p6 = os.pullEvent()
                             if ev4=="mouse_click" then
@@ -3380,8 +3423,7 @@ local function adminMenu()
                                     local r=rpc({type="admin_delete_user",token=token,username=target},10)
                                     if r and r.ok then msg2="Deleted: "..target mt2=os.clock()+3 end
                                     break
-                                elseif p6==5 and p5>=9 and p5<=12 then break
-                                end
+                                elseif p6==5 and p5>=9 then break end
                             elseif ev4=="key" then
                                 if p4==keys.y then
                                     local r=rpc({type="admin_delete_user",token=token,username=target},10)
@@ -3390,6 +3432,7 @@ local function adminMenu()
                                 break
                             end
                         end
+                        if msg2 ~= "" then break end  -- exit manage loop after delete
                     end
                 end
             end
